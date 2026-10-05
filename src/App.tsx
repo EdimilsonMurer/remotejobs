@@ -4,19 +4,20 @@ import { JobSearch } from './components/JobSearch';
 import { PlatformManager } from './components/PlatformManager';
 import { BlacklistManager } from './components/BlacklistManager';
 import { CrewAIGenerator } from './components/CrewAIGenerator';
-import { EarningsCalculator } from './components/EarningsCalculator';
+import { SettingsManager } from './components/SettingsManager';
 import { GuidesModal } from './components/GuidesModal';
 import { PlatformModal } from './components/PlatformModal';
 import { PipelineMonitor } from './components/PipelineMonitor';
 import { Platform, BlacklistRule, JobOpportunity } from './types/job';
 import { INITIAL_PLATFORMS, INITIAL_BLACKLIST_RULES } from './data/initialPlatforms';
 import { CURATED_JOBS } from './data/curatedJobs';
+import { loadPlatformsFromSupabase, savePlatformToSupabase } from './lib/supabase/platforms';
 
 const STORAGE_KEY_PLATFORMS = 'remotehunter_platforms_v1';
 const STORAGE_KEY_RULES = 'remotehunter_blacklist_rules_v1';
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<'jobs' | 'platforms' | 'blacklist' | 'crewai' | 'calculator' | 'guide' | 'pipeline'>('jobs');
+  const [activeTab, setActiveTab] = useState<'jobs' | 'platforms' | 'blacklist' | 'crewai' | 'guide' | 'pipeline' | 'settings'>('jobs');
   
   // Load state from localStorage with fallbacks & auto-migration
   const [platforms, setPlatforms] = useState<Platform[]>(() => {
@@ -41,6 +42,17 @@ export default function App() {
     }
     return INITIAL_PLATFORMS;
   });
+
+  // Carrega do Supabase em segundo plano ao inicializar
+  useEffect(() => {
+    loadPlatformsFromSupabase().then(loaded => {
+      if (loaded && loaded.length > 0) {
+        setPlatforms(loaded);
+      }
+    }).catch(err => {
+      console.warn('[Supabase] Usando cache local:', err);
+    });
+  }, []);
 
   const [blacklistRules, setBlacklistRules] = useState<BlacklistRule[]>(() => {
     try {
@@ -115,6 +127,11 @@ export default function App() {
         return prev.map(p => p.id === savedPlatform.id ? savedPlatform : p);
       }
       return [savedPlatform, ...prev];
+    });
+
+    // Salva no Supabase e em cache local
+    savePlatformToSupabase(savedPlatform).catch(err => {
+      console.warn('[Supabase] Erro ao sincronizar plataforma:', err);
     });
 
     // If marked as Blacklist, ensure there's a rule for it too
@@ -215,8 +232,8 @@ export default function App() {
           <PipelineMonitor />
         )}
 
-        {activeTab === 'calculator' && (
-          <EarningsCalculator />
+        {activeTab === 'settings' && (
+          <SettingsManager />
         )}
 
         {activeTab === 'guide' && (

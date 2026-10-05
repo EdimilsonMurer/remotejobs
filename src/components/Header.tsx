@@ -1,9 +1,9 @@
 import React from 'react';
-import { ShieldAlert, Compass, Layers, Calculator, BookOpen, Plus, Bot, Globe, Activity } from 'lucide-react';
+import { ShieldAlert, Compass, Layers, Settings, BookOpen, Plus, Bot, Globe, Activity } from 'lucide-react';
 
 interface HeaderProps {
-  activeTab: 'jobs' | 'platforms' | 'blacklist' | 'crewai' | 'calculator' | 'guide' | 'pipeline';
-  setActiveTab: (tab: 'jobs' | 'platforms' | 'blacklist' | 'crewai' | 'calculator' | 'guide' | 'pipeline') => void;
+  activeTab: 'jobs' | 'platforms' | 'blacklist' | 'crewai' | 'guide' | 'pipeline' | 'settings';
+  setActiveTab: (tab: 'jobs' | 'platforms' | 'blacklist' | 'crewai' | 'guide' | 'pipeline' | 'settings') => void;
   blacklistCount: number;
   favoritesCount: number;
   activeAccountsCount: number;
@@ -118,15 +118,15 @@ export const Header: React.FC<HeaderProps> = ({
           </button>
 
           <button
-            onClick={() => setActiveTab('calculator')}
+            onClick={() => setActiveTab('settings')}
             className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors whitespace-nowrap flex items-center gap-1.5 ${
-              activeTab === 'calculator'
-                ? 'bg-slate-800 text-emerald-400 border border-slate-700 shadow-sm'
-                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900'
+              activeTab === 'settings'
+                ? 'bg-slate-800 text-blue-400 border border-slate-700 shadow-sm'
+                : 'text-slate-400 hover:text-blue-300 hover:bg-slate-900'
             }`}
           >
-            <Calculator className="w-3.5 h-3.5" />
-            <span>Câmbio & Simulador</span>
+            <Settings className="w-3.5 h-3.5" />
+            <span>Configurações</span>
           </button>
 
           <button
@@ -199,12 +199,12 @@ export const Header: React.FC<HeaderProps> = ({
           Automação & Logs
         </button>
         <button
-          onClick={() => setActiveTab('calculator')}
+          onClick={() => setActiveTab('settings')}
           className={`px-2.5 py-1 text-xs font-medium rounded whitespace-nowrap ${
-            activeTab === 'calculator' ? 'bg-slate-800 text-emerald-400' : 'text-slate-400'
+            activeTab === 'settings' ? 'bg-slate-800 text-blue-400' : 'text-slate-400'
           }`}
         >
-          Câmbio
+          Configurações
         </button>
         <button
           onClick={() => setActiveTab('guide')}

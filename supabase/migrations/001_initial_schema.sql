@@ -25,14 +25,22 @@ DO $$ BEGIN
     END IF;
 END $$;
 
--- 2. TABELA DE PLATAFORMAS (Fontes iniciais)
+-- 2. TABELA DE PLATAFORMAS (Fontes e anotações do usuário)
 CREATE TABLE IF NOT EXISTS platforms (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     name VARCHAR(100) NOT NULL UNIQUE,
     slug VARCHAR(100) NOT NULL UNIQUE,
     website_url TEXT NOT NULL,
     jobs_url TEXT NOT NULL,
-    connector_type VARCHAR(50) NOT NULL DEFAULT 'GREENHOUSE_API',
+    connector_type VARCHAR(50) NOT NULL DEFAULT 'LEVER_API',
+    category VARCHAR(150) DEFAULT 'Treinamento de IA',
+    currency VARCHAR(10) DEFAULT 'USD',
+    english_requirement VARCHAR(50) DEFAULT 'READING_ONLY',
+    process_type VARCHAR(50) DEFAULT 'ONLINE_EXAM',
+    user_status VARCHAR(50) DEFAULT 'NOT_REGISTERED',
+    notes TEXT DEFAULT '',
+    average_pay_rate VARCHAR(100),
+    payment_methods TEXT[] DEFAULT '{}',
     enabled BOOLEAN DEFAULT true,
     status platform_status DEFAULT 'HEALTHY',
     last_run_at TIMESTAMPTZ,

@@ -31,6 +31,61 @@ interface PlatformManagerProps {
   onOpenEditModal: (platform: Platform) => void;
 }
 
+// Componente para edição direta e instantânea das observações da plataforma
+const InlinePlatformNotes: React.FC<{
+  platform: Platform;
+  onSave: (notes: string) => void;
+}> = ({ platform, onSave }) => {
+  const [text, setText] = useState(platform.notes || '');
+  const [isSaved, setIsSaved] = useState(false);
+
+  // Sincroniza se a plataforma for atualizada externamente
+  React.useEffect(() => {
+    setText(platform.notes || '');
+  }, [platform.notes]);
+
+  const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const val = e.target.value;
+    setText(val);
+  };
+
+  const handleBlur = () => {
+    if (text !== platform.notes) {
+      onSave(text);
+      setIsSaved(true);
+      setTimeout(() => setIsSaved(false), 2500);
+    }
+  };
+
+  return (
+    <div className="mt-2 mb-3 bg-slate-950/80 border border-slate-800 focus-within:border-emerald-500/80 rounded-lg p-2.5 transition-all">
+      <div className="flex items-center justify-between text-[11px] mb-1.5">
+        <label className="font-semibold text-slate-400 flex items-center gap-1">
+          <Edit className="w-3 h-3 text-emerald-400" />
+          <span>Observações & Anotações:</span>
+        </label>
+        {isSaved ? (
+          <span className="text-[10px] font-semibold text-emerald-400 flex items-center gap-1 animate-in fade-in">
+            <CheckCircle2 className="w-3 h-3" />
+            Salvo
+          </span>
+        ) : (
+          <span className="text-[10px] text-slate-500">Edite diretamente</span>
+        )}
+      </div>
+
+      <textarea
+        value={text}
+        onChange={handleChange}
+        onBlur={handleBlur}
+        rows={3}
+        placeholder="Adicione observações, links de guidelines, dicas da prova ou anotações pessoais desta plataforma..."
+        className="w-full bg-slate-900/90 text-xs text-slate-200 placeholder:text-slate-600 rounded-md p-2 border border-slate-800/80 focus:outline-hidden focus:border-emerald-500/80 transition-colors resize-y leading-relaxed font-sans"
+      />
+    </div>
+  );
+};
+
 export const PlatformManager: React.FC<PlatformManagerProps> = ({
   platforms,
   onUpdatePlatform,
@@ -366,12 +421,17 @@ export const PlatformManager: React.FC<PlatformManagerProps> = ({
                   )}
                 </div>
 
-                {/* Notes */}
-                {platform.notes && (
-                  <p className="text-xs text-slate-400 bg-slate-950/60 p-2.5 rounded-lg border border-slate-800/80 mb-4 leading-relaxed">
-                    {platform.notes}
-                  </p>
-                )}
+                {/* Interactive Inline Notes */}
+                <InlinePlatformNotes 
+                  platform={platform}
+                  onSave={(newNotes) => {
+                    onUpdatePlatform({
+                      ...platform,
+                      notes: newNotes,
+                      updatedAt: new Date().toISOString().split('T')[0]
+                    });
+                  }}
+                />
 
               </div>
 
