@@ -1,0 +1,252 @@
+import React, { useState, useEffect } from 'react';
+import { Header } from './components/Header';
+import { JobSearch } from './components/JobSearch';
+import { PlatformManager } from './components/PlatformManager';
+import { BlacklistManager } from './components/BlacklistManager';
+import { CrewAIGenerator } from './components/CrewAIGenerator';
+import { EarningsCalculator } from './components/EarningsCalculator';
+import { GuidesModal } from './components/GuidesModal';
+import { PlatformModal } from './components/PlatformModal';
+import { PipelineMonitor } from './components/PipelineMonitor';
+import { Platform, BlacklistRule, JobOpportunity } from './types/job';
+import { INITIAL_PLATFORMS, INITIAL_BLACKLIST_RULES } from './data/initialPlatforms';
+import { CURATED_JOBS } from './data/curatedJobs';
+
+const STORAGE_KEY_PLATFORMS = 'remotehunter_platforms_v1';
+const STORAGE_KEY_RULES = 'remotehunter_blacklist_rules_v1';
+
+export default function App() {
+  const [activeTab, setActiveTab] = useState<'jobs' | 'platforms' | 'blacklist' | 'crewai' | 'calculator' | 'guide' | 'pipeline'>('jobs');
+  
+  // Load state from localStorage with fallbacks & auto-migration
+  const [platforms, setPlatforms] = useState<Platform[]>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY_PLATFORMS);
+      if (saved) {
+        const parsed: Platform[] = JSON.parse(saved);
+        // Auto-fix any deprecated lever.co links or broken URLs
+        return parsed.map(p => {
+          if (p.id === 'welocalize' && (p.careersUrl?.includes('jobs.lever.co') || p.websiteUrl?.includes('jobs.lever.co'))) {
+            return {
+              ...p,
+              careersUrl: 'https://www.welocalize.com/careers/',
+              websiteUrl: 'https://www.welocalize.com/'
+            };
+          }
+          return p;
+        });
+      }
+    } catch (e) {
+      console.error('Error loading platforms from storage:', e);
+    }
+    return INITIAL_PLATFORMS;
+  });
+
+  const [blacklistRules, setBlacklistRules] = useState<BlacklistRule[]>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY_RULES);
+      if (saved) {
+        return JSON.parse(saved);
+      }
+    } catch (e) {
+      console.error('Error loading blacklist rules from storage:', e);
+    }
+    return INITIAL_BLACKLIST_RULES;
+  });
+
+  const [jobs, setJobs] = useState<JobOpportunity[]>(() => {
+    try {
+      const savedJobs = localStorage.getItem('remotehunter_custom_jobs_v1');
+      if (savedJobs) {
+        const parsed = JSON.parse(savedJobs);
+        return [...parsed, ...CURATED_JOBS];
+      }
+    } catch (e) {
+      console.error('Error loading custom jobs:', e);
+    }
+    return CURATED_JOBS;
+  });
+
+  const handleAddCustomJob = (newJob: JobOpportunity) => {
+    setJobs(prev => [newJob, ...prev]);
+    try {
+      const savedCustom = JSON.parse(localStorage.getItem('remotehunter_custom_jobs_v1') || '[]');
+      localStorage.setItem('remotehunter_custom_jobs_v1', JSON.stringify([newJob, ...savedCustom]));
+    } catch (e) {
+      console.error('Error saving custom job:', e);
+    }
+  };
+
+  const handleBatchImportJobs = (importedList: JobOpportunity[]) => {
+    setJobs(prev => [...importedList, ...prev]);
+    try {
+      const savedCustom = JSON.parse(localStorage.getItem('remotehunter_custom_jobs_v1') || '[]');
+      localStorage.setItem('remotehunter_custom_jobs_v1', JSON.stringify([...importedList, ...savedCustom]));
+    } catch (e) {
+      console.error('Error saving imported jobs:', e);
+    }
+  };
+  const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [editingPlatform, setEditingPlatform] = useState<Platform | null>(null);
+
+  // Sync platforms to localStorage
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEY_PLATFORMS, JSON.stringify(platforms));
+    } catch (e) {
+      console.error('Error saving platforms:', e);
+    }
+  }, [platforms]);
+
+  // Sync blacklist rules to localStorage
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEY_RULES, JSON.stringify(blacklistRules));
+    } catch (e) {
+      console.error('Error saving blacklist rules:', e);
+    }
+  }, [blacklistRules]);
+
+  // Handlers
+  const handleSavePlatform = (savedPlatform: Platform) => {
+    setPlatforms(prev => {
+      const exists = prev.some(p => p.id === savedPlatform.id);
+      if (exists) {
+        return prev.map(p => p.id === savedPlatform.id ? savedPlatform : p);
+      }
+      return [savedPlatform, ...prev];
+    });
+
+    // If marked as Blacklist, ensure there's a rule for it too
+    if (savedPlatform.status === 'BLACKLIST') {
+      const ruleExists = blacklistRules.some(r => r.name.toLowerCase() === savedPlatform.name.toLowerCase());
+      if (!ruleExists) {
+        const newRule: BlacklistRule = {
+          id: `rule-${Date.now()}`,
+          name: savedPlatform.name,
+          type: 'PLATFORM',
+          reason: savedPlatform.blacklistReason || 'Plataforma adicionada à lista negra',
+          addedAt: new Date().toISOString().split('T')[0]
+        };
+        setBlacklistRules(r => [newRule, ...r]);
+      }
+    }
+  };
+
+  const handleDeletePlatform = (id: string) => {
+    setPlatforms(prev => prev.filter(p => p.id !== id));
+  };
+
+  const handleAddRule = (rule: BlacklistRule) => {
+    setBlacklistRules(prev => [rule, ...prev]);
+  };
+
+  const handleRemoveRule = (id: string) => {
+    setBlacklistRules(prev => prev.filter(r => r.id !== id));
+  };
+
+  const handleOpenEdit = (platform: Platform) => {
+    setEditingPlatform(platform);
+    setIsAddModalOpen(true);
+  };
+
+  const handleOpenAdd = () => {
+    setEditingPlatform(null);
+    setIsAddModalOpen(true);
+  };
+
+  const blacklistCount = platforms.filter(p => p.status === 'BLACKLIST').length + blacklistRules.filter(r => !platforms.some(p => p.status === 'BLACKLIST' && p.name.toLowerCase() === r.name.toLowerCase())).length;
+  const favoritesCount = platforms.filter(p => p.status === 'FAVORITE').length;
+  const activeAccountsCount = platforms.filter(p => p.status !== 'BLACKLIST' && p.userStatus === 'APPROVED_ACTIVE').length;
+
+  return (
+    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col selection:bg-emerald-500 selection:text-slate-950">
+      
+      {/* Top Bar Header */}
+      <Header
+        activeTab={activeTab}
+        setActiveTab={setActiveTab}
+        blacklistCount={blacklistCount}
+        favoritesCount={favoritesCount}
+        activeAccountsCount={activeAccountsCount}
+        onOpenAddModal={handleOpenAdd}
+      />
+
+      {/* Main Content Area */}
+      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-8 py-6">
+        {activeTab === 'jobs' && (
+          <JobSearch
+            jobs={jobs}
+            platforms={platforms}
+            onOpenGuides={() => setActiveTab('guide')}
+            onAddCustomJob={handleAddCustomJob}
+          />
+        )}
+
+        {activeTab === 'platforms' && (
+          <PlatformManager
+            platforms={platforms}
+            onUpdatePlatform={handleSavePlatform}
+            onDeletePlatform={handleDeletePlatform}
+            onOpenAddModal={handleOpenAdd}
+            onOpenEditModal={handleOpenEdit}
+          />
+        )}
+
+        {activeTab === 'blacklist' && (
+          <BlacklistManager
+            platforms={platforms}
+            blacklistRules={blacklistRules}
+            onAddRule={handleAddRule}
+            onRemoveRule={handleRemoveRule}
+            onUpdatePlatform={handleSavePlatform}
+          />
+        )}
+
+        {activeTab === 'crewai' && (
+          <CrewAIGenerator
+            platforms={platforms}
+            blacklistRules={blacklistRules}
+            onImportJobs={handleBatchImportJobs}
+          />
+        )}
+
+        {activeTab === 'pipeline' && (
+          <PipelineMonitor />
+        )}
+
+        {activeTab === 'calculator' && (
+          <EarningsCalculator />
+        )}
+
+        {activeTab === 'guide' && (
+          <GuidesModal />
+        )}
+      </main>
+
+      {/* Footer */}
+      <footer className="border-t border-slate-900 py-6 px-4 text-center text-xs text-slate-500">
+        <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-3">
+          <span>RemoteHunter Pro — Monitor de Oportunidades Remotas em Moeda Forte</span>
+          <div className="flex items-center gap-4 text-[11px] text-slate-400">
+            <span>Dados salvos localmente</span>
+            <span>·</span>
+            <span>Sem intermediários</span>
+          </div>
+        </div>
+      </footer>
+
+      {/* Add / Edit Platform Modal */}
+      <PlatformModal
+        isOpen={isAddModalOpen}
+        onClose={() => {
+          setIsAddModalOpen(false);
+          setEditingPlatform(null);
+        }}
+        onSave={handleSavePlatform}
+        editingPlatform={editingPlatform}
+      />
+
+    </div>
+  );
+}

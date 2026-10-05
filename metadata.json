@@ -1,0 +1,6 @@
+{
+  "name": "RemoteHunter Pro - Vagas Remotas & Plataformas Internacionais",
+  "description": "Buscador de vagas remotas em moeda forte, central de plataformas internacionais (Welocalize, OneForma, Telus, Outlier) e gestão de Lista Negra sem exigência de entrevista em inglês.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
