@@ -1,10 +1,11 @@
 # Copie este conteúdo para um arquivo .github/workflows/pipeline-cron.yml no GitHub se desejar agendamento automático via GitHub Actions:
-
+# Para 12 horas: - cron: '0 */12 * * *'
+# Para 24 horas: - cron: '0 0 * * *'
 name: RemoteJobs Pipeline Ingestion
 
 on:
   schedule:
-    - cron: '0 */6 * * *'
+    - cron: '0 */12 * * *'
   workflow_dispatch:
 
 jobs:
