@@ -14,9 +14,23 @@ import {
   KeyRound,
   ExternalLink,
   Sliders,
-  AlertCircle
+  AlertCircle,
+  EyeOff,
+  RotateCcw,
+  Languages,
+  Plus,
+  X,
+  Tag
 } from 'lucide-react';
 import { isSupabaseConfigured } from '../lib/supabase/client';
+import { getHiddenJobIds, unhideAllJobs } from '../services/jobsSyncService';
+import { 
+  getBlockedKeywords, 
+  addBlockedKeyword, 
+  removeBlockedKeyword, 
+  resetDefaultBlockedKeywords, 
+  clearAllBlockedKeywords 
+} from '../services/blockedKeywordsService';
 
 export const SettingsManager: React.FC = () => {
   // Intervalo de busca em horas (padrão: 6 horas)
@@ -28,6 +42,47 @@ export const SettingsManager: React.FC = () => {
       return 6;
     }
   });
+
+  const [hiddenCount, setHiddenCount] = useState<number>(() => {
+    return getHiddenJobIds().size;
+  });
+
+  // Lista de Palavras Proibidas / Blacklist de Termos em Anúncios
+  const [blockedWords, setBlockedWords] = useState<string[]>(() => {
+    return getBlockedKeywords();
+  });
+  const [newWordInput, setNewWordInput] = useState<string>('');
+
+  const handleAddWord = () => {
+    const trimmed = newWordInput.trim();
+    if (!trimmed) return;
+    const updated = addBlockedKeyword(trimmed);
+    setBlockedWords(updated);
+    setNewWordInput('');
+    setSaveFeedback(`Palavra "${trimmed}" adicionada às regras de bloqueio!`);
+    setTimeout(() => setSaveFeedback(null), 3000);
+  };
+
+  const handleRemoveWord = (word: string) => {
+    const updated = removeBlockedKeyword(word);
+    setBlockedWords(updated);
+    setSaveFeedback(`Palavra "${word}" removida!`);
+    setTimeout(() => setSaveFeedback(null), 3000);
+  };
+
+  const handleResetWords = () => {
+    const updated = resetDefaultBlockedKeywords();
+    setBlockedWords(updated);
+    setSaveFeedback('Lista de palavras padrão de idiomas restaurada com sucesso!');
+    setTimeout(() => setSaveFeedback(null), 3000);
+  };
+
+  const handleClearWords = () => {
+    const updated = clearAllBlockedKeywords();
+    setBlockedWords(updated);
+    setSaveFeedback('Todas as palavras proibidas foram limpas.');
+    setTimeout(() => setSaveFeedback(null), 3000);
+  };
 
   const [missedCyclesToClose, setMissedCyclesToClose] = useState<number>(() => {
     try {
@@ -300,14 +355,108 @@ jobs:
         </div>
       </div>
 
-      {/* Seção 2: Regras de Expiração & Limpeza */}
+      {/* Seção 2: Palavras Proibidas nos Anúncios (Anti-Idiomas Estrangeiros) */}
+      <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-6 space-y-5">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-3">
+          <div>
+            <h2 className="text-sm font-bold text-white flex items-center gap-2">
+              <Languages className="w-4 h-4 text-amber-400" />
+              <span>Palavras Proibidas nos Anúncios (Filtro "Apenas Português")</span>
+            </h2>
+            <p className="text-xs text-slate-400 mt-1">
+              Vagas que contiverem qualquer um destes termos no título ou na descrição serão desqualificadas do modo "Apenas Português".
+            </p>
+          </div>
+
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              onClick={handleResetWords}
+              className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold rounded-lg transition-colors border border-slate-700 flex items-center gap-1.5 cursor-pointer"
+              title="Restaurar a lista padrão de termos de idiomas estrangeiros"
+            >
+              <RotateCcw className="w-3.5 h-3.5 text-cyan-400" />
+              <span>Restaurar Padrão</span>
+            </button>
+            {blockedWords.length > 0 && (
+              <button
+                onClick={handleClearWords}
+                className="px-3 py-1.5 bg-slate-800 hover:bg-rose-950/60 hover:text-rose-300 text-slate-400 text-xs font-medium rounded-lg transition-colors border border-slate-700 cursor-pointer"
+              >
+                Limpar
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Input para Adicionar Nova Palavra */}
+        <div className="flex flex-col sm:flex-row gap-2">
+          <div className="relative flex-1">
+            <Tag className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-500" />
+            <input
+              type="text"
+              value={newWordInput}
+              onChange={(e) => setNewWordInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  handleAddWord();
+                }
+              }}
+              placeholder="Digite uma palavra para proibir (ex: italiano, bilingue, english, alemão)..."
+              className="w-full pl-10 pr-4 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-xs text-slate-200 placeholder:text-slate-500 focus:outline-hidden focus:border-amber-500 focus:ring-1 focus:ring-amber-500"
+            />
+          </div>
+          <button
+            onClick={handleAddWord}
+            disabled={!newWordInput.trim()}
+            className="px-4 py-2.5 bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-slate-950 text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer shrink-0"
+          >
+            <Plus className="w-4 h-4" />
+            <span>Adicionar Termo</span>
+          </button>
+        </div>
+
+        {/* Lista de Chips / Tags Ativas */}
+        <div className="space-y-2">
+          <div className="flex items-center justify-between text-xs text-slate-400">
+            <span>Termos Ativos ({blockedWords.length}):</span>
+            <span className="text-[11px] text-slate-500">Clique no "x" para remover qualquer termo</span>
+          </div>
+
+          {blockedWords.length === 0 ? (
+            <div className="p-4 rounded-xl bg-slate-950 border border-slate-800 text-center text-xs text-slate-500">
+              Nenhuma palavra cadastrada. Use o campo acima ou clique em "Restaurar Padrão".
+            </div>
+          ) : (
+            <div className="flex flex-wrap gap-2 p-3 bg-slate-950/80 rounded-xl border border-slate-800/90 max-h-48 overflow-y-auto">
+              {blockedWords.map((word) => (
+                <span
+                  key={word}
+                  className="inline-flex items-center gap-1.5 px-3 py-1 bg-slate-900 hover:bg-slate-800 text-slate-200 border border-slate-700 text-xs rounded-lg font-medium transition-colors group"
+                >
+                  <span className="text-amber-400 font-semibold">{word}</span>
+                  <button
+                    onClick={() => handleRemoveWord(word)}
+                    className="text-slate-400 hover:text-rose-400 transition-colors p-0.5 rounded cursor-pointer"
+                    title={`Remover "${word}"`}
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Seção 3: Regras de Expiração & Limpeza */}
       <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-6 space-y-5">
         <h2 className="text-sm font-bold text-white flex items-center gap-2 border-b border-slate-800 pb-3">
           <Sliders className="w-4 h-4 text-emerald-400" />
           Regras de Atualização & Expiração de Vagas
         </h2>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div className="bg-slate-950 p-4 rounded-xl border border-slate-800/80 space-y-2">
             <label className="text-xs font-semibold text-slate-300 block">
               Desativar vaga após ausência na fonte oficial:
@@ -338,6 +487,40 @@ jobs:
             <span className="text-[11px] text-slate-500 block">
               Vagas cujo conteúdo não mudou têm apenas a data de visualização atualizada, sem gastar chamadas do Gemini.
             </span>
+          </div>
+
+          <div className="bg-slate-950 p-4 rounded-xl border border-slate-800/80 space-y-2 flex flex-col justify-between">
+            <div>
+              <label className="text-xs font-semibold text-slate-300 block flex items-center gap-1.5">
+                <EyeOff className="w-3.5 h-3.5 text-amber-400" />
+                <span>Vagas Ocultadas pelo Usuário:</span>
+              </label>
+              <div className="text-xs text-slate-300 mt-1 font-medium">
+                {hiddenCount > 0 ? (
+                  <span className="text-amber-400 font-bold">{hiddenCount} vaga(s) oculta(s) da listagem</span>
+                ) : (
+                  <span className="text-slate-500">Nenhuma vaga oculta</span>
+                )}
+              </div>
+              <span className="text-[11px] text-slate-500 block mt-1">
+                Permanecem registradas na base de dados para sincronização sem duplicidade.
+              </span>
+            </div>
+
+            {hiddenCount > 0 && (
+              <button
+                onClick={() => {
+                  unhideAllJobs();
+                  setHiddenCount(0);
+                  setSaveFeedback('Todas as vagas ocultadas foram restauradas com sucesso!');
+                  setTimeout(() => setSaveFeedback(null), 4000);
+                }}
+                className="mt-2 px-3 py-1.5 bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-200 text-xs font-semibold rounded-lg transition-colors flex items-center justify-center gap-1.5 cursor-pointer w-full"
+              >
+                <RotateCcw className="w-3.5 h-3.5 text-cyan-400" />
+                <span>Restaurar Todas</span>
+              </button>
+            )}
           </div>
         </div>
       </div>

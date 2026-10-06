@@ -24,8 +24,20 @@ export class GeminiClassifier {
     const hasPortugueseInBody = text.includes('portuguese') || text.includes('português') || text.includes('pt-br');
     const portugueseRequired = hasPortugueseInTitle || hasPortugueseInBody;
 
-    // Análise de requisitos de Inglês
-    const requiresBoth = text.includes('both in portuguese') || text.includes('and english') || text.includes('bilingual');
+    // Análise de requisitos de Inglês e Outros Idiomas Estrangeiros
+    const hasOtherLanguageInTitle = 
+      job.title.toLowerCase().includes('italian') || 
+      job.title.toLowerCase().includes('italiano') || 
+      job.title.toLowerCase().includes('german') || 
+      job.title.toLowerCase().includes('alemão') || 
+      job.title.toLowerCase().includes('spanish') || 
+      job.title.toLowerCase().includes('espanhol') || 
+      job.title.toLowerCase().includes('french') || 
+      job.title.toLowerCase().includes('francês') || 
+      job.title.toLowerCase().includes('bilingual') || 
+      job.title.toLowerCase().includes('bilíngue');
+
+    const requiresBoth = text.includes('both in portuguese') || text.includes('and english') || text.includes('bilingual') || text.includes('inglês e italiano') || text.includes('english and italian');
     const requiresEnglishExplicit = 
       text.includes('english proficiency') || 
       text.includes('strong understanding of english') || 
@@ -41,14 +53,18 @@ export class GeminiClassifier {
     let score = 50;
     let reason = 'Análise semântica automatizada.';
 
-    if (onlyPortugueseWork) {
+    if (hasOtherLanguageInTitle && !hasPortugueseInTitle) {
+      englishStatus = 'REQUIRED';
+      score = 30;
+      reason = 'O anúncio exige domínio de outro idioma estrangeiro especificado no cargo (como italiano, bilíngue ou similar), não sendo adequado para quem busca trabalho 100% em português.';
+    } else if (onlyPortugueseWork) {
       englishStatus = 'PARTIAL';
       score = 88;
       reason = 'Excelente oportunidade: todo o trabalho é realizado em português brasileiro. O inglês pode ser necessário apenas para login ou termos da plataforma.';
     } else if (requiresBoth || requiresEnglishExplicit) {
       englishStatus = 'REQUIRED';
       score = 35;
-      reason = 'A vaga exige realização de tarefas ou comunicação em inglês além do português, sendo menos indicada para quem não domina o idioma.';
+      reason = 'A vaga exige realização de tarefas ou comunicação em idiomas estrangeiros além do português, sendo menos indicada para quem busca vagas exclusivas em português.';
     } else if (englishNiceToHave) {
       englishStatus = 'DESIRABLE';
       score = 75;

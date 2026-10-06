@@ -6,17 +6,20 @@ export interface UnifiedJobWithStatus extends NormalizedJob {
   is_new?: boolean;
   first_seen_at?: string;
   is_seen?: boolean;
+  is_hidden?: boolean;
 }
 
 const STORAGE_KEY_KNOWN_IDS = 'remotehunter_known_job_ids_v2';
 const STORAGE_KEY_NEW_IDS = 'remotehunter_new_job_ids_v2';
 const STORAGE_KEY_SEEN_IDS = 'remotehunter_seen_job_ids_v2';
+const STORAGE_KEY_HIDDEN_IDS = 'remotehunter_hidden_job_ids_v2';
 const STORAGE_KEY_LAST_SYNC = 'remotehunter_last_sync_timestamp_v2';
 
 export interface SyncState {
   knownIds: Set<string>;
   newIds: Set<string>;
   seenIds: Set<string>;
+  hiddenIds: Set<string>;
   lastSyncAt: string | null;
 }
 
@@ -58,12 +61,14 @@ export function getStoredSyncState(): SyncState {
     const knownRaw = localStorage.getItem(STORAGE_KEY_KNOWN_IDS);
     const newRaw = localStorage.getItem(STORAGE_KEY_NEW_IDS);
     const seenRaw = localStorage.getItem(STORAGE_KEY_SEEN_IDS);
+    const hiddenRaw = localStorage.getItem(STORAGE_KEY_HIDDEN_IDS);
     const lastSync = localStorage.getItem(STORAGE_KEY_LAST_SYNC);
 
     return {
       knownIds: new Set(knownRaw ? JSON.parse(knownRaw) : []),
       newIds: new Set(newRaw ? JSON.parse(newRaw) : []),
       seenIds: new Set(seenRaw ? JSON.parse(seenRaw) : []),
+      hiddenIds: new Set(hiddenRaw ? JSON.parse(hiddenRaw) : []),
       lastSyncAt: lastSync || null
     };
   } catch (e) {
@@ -72,6 +77,7 @@ export function getStoredSyncState(): SyncState {
       knownIds: new Set(),
       newIds: new Set(),
       seenIds: new Set(),
+      hiddenIds: new Set(),
       lastSyncAt: null
     };
   }
@@ -85,6 +91,7 @@ export function saveSyncState(state: SyncState): void {
     localStorage.setItem(STORAGE_KEY_KNOWN_IDS, JSON.stringify(Array.from(state.knownIds)));
     localStorage.setItem(STORAGE_KEY_NEW_IDS, JSON.stringify(Array.from(state.newIds)));
     localStorage.setItem(STORAGE_KEY_SEEN_IDS, JSON.stringify(Array.from(state.seenIds)));
+    localStorage.setItem(STORAGE_KEY_HIDDEN_IDS, JSON.stringify(Array.from(state.hiddenIds)));
     if (state.lastSyncAt) {
       localStorage.setItem(STORAGE_KEY_LAST_SYNC, state.lastSyncAt);
     }
@@ -94,7 +101,7 @@ export function saveSyncState(state: SyncState): void {
 }
 
 /**
- * Aplica os marcadores is_new e is_seen à lista de vagas com base no estado salvo
+ * Aplica os marcadores is_new, is_seen e is_hidden à lista de vagas com base no estado salvo
  */
 export function applyNewJobFlags(jobs: UnifiedJobWithStatus[]): UnifiedJobWithStatus[] {
   let state = getStoredSyncState();
@@ -107,6 +114,7 @@ export function applyNewJobFlags(jobs: UnifiedJobWithStatus[]): UnifiedJobWithSt
       knownIds: allIds,
       newIds: new Set(),
       seenIds: new Set(),
+      hiddenIds: new Set(),
       lastSyncAt: state.lastSyncAt || new Date().toISOString()
     };
     saveSyncState(state);
@@ -115,11 +123,13 @@ export function applyNewJobFlags(jobs: UnifiedJobWithStatus[]): UnifiedJobWithSt
   return jobs.map(job => {
     const isNew = state.newIds.has(job.external_id) && !state.seenIds.has(job.external_id);
     const isSeen = state.seenIds.has(job.external_id);
+    const isHidden = state.hiddenIds.has(job.external_id);
 
     return {
       ...job,
       is_new: isNew,
       is_seen: isSeen,
+      is_hidden: isHidden,
       first_seen_at: job.first_seen_at || (isNew ? state.lastSyncAt || new Date().toISOString() : undefined)
     };
   });
@@ -155,7 +165,10 @@ export function processDatabaseUpdate(
 
   // Primeiro adiciona as existentes
   for (const job of existingJobs) {
-    mergedMap.set(job.external_id, { ...job });
+    mergedMap.set(job.external_id, { 
+      ...job,
+      is_hidden: state.hiddenIds.has(job.external_id)
+    });
   }
 
   // Agora compara e insere as recebidas
@@ -171,11 +184,13 @@ export function processDatabaseUpdate(
     }
 
     const isCurrentNew = state.newIds.has(fresh.external_id) && !state.seenIds.has(fresh.external_id);
+    const isHidden = state.hiddenIds.has(fresh.external_id);
 
     mergedMap.set(fresh.external_id, {
       ...fresh,
       is_new: isCurrentNew,
       is_seen: state.seenIds.has(fresh.external_id),
+      is_hidden: isHidden,
       first_seen_at: fresh.first_seen_at || (isBrandNew ? syncTimestamp : undefined)
     });
   }
@@ -222,4 +237,40 @@ export function markAllJobsAsSeen(): void {
   }
   state.newIds.clear();
   saveSyncState(state);
+}
+
+/**
+ * Oculta uma vaga para não aparecer mais na listagem principal do app,
+ * mas preserva seus dados no banco e no controle de sincronização.
+ */
+export function hideJob(jobId: string): void {
+  const state = getStoredSyncState();
+  state.hiddenIds.add(jobId);
+  saveSyncState(state);
+}
+
+/**
+ * Restaura (desoculta) uma vaga para voltar a aparecer na listagem principal.
+ */
+export function unhideJob(jobId: string): void {
+  const state = getStoredSyncState();
+  state.hiddenIds.delete(jobId);
+  saveSyncState(state);
+}
+
+/**
+ * Restaura todas as vagas ocultadas.
+ */
+export function unhideAllJobs(): void {
+  const state = getStoredSyncState();
+  state.hiddenIds.clear();
+  saveSyncState(state);
+}
+
+/**
+ * Retorna o conjunto de IDs ocultados.
+ */
+export function getHiddenJobIds(): Set<string> {
+  const state = getStoredSyncState();
+  return state.hiddenIds;
 }

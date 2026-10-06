@@ -14,23 +14,37 @@ import {
   Layers, 
   ArrowRight,
   Languages,
-  Loader2
+  Loader2,
+  EyeOff,
+  Eye
 } from 'lucide-react';
 import { NormalizedJob } from '../connectors/base/types';
 import { JobAnalysis } from '../types/job';
 import { getPortugueseJobDescription, quickTranslateText } from '../services/translationService';
+import { checkJobForBlockedKeywords } from '../services/blockedKeywordsService';
 
 interface JobDetailModalProps {
-  job: (NormalizedJob & { analysis?: JobAnalysis; is_new?: boolean; is_seen?: boolean }) | null;
+  job: (NormalizedJob & { analysis?: JobAnalysis; is_new?: boolean; is_seen?: boolean; is_hidden?: boolean }) | null;
   isOpen: boolean;
   onClose: () => void;
   onMarkAsSeen?: (jobId: string) => void;
+  onHideJob?: (jobId: string) => void;
+  onUnhideJob?: (jobId: string) => void;
 }
 
-export const JobDetailModal: React.FC<JobDetailModalProps> = ({ job, isOpen, onClose, onMarkAsSeen }) => {
+export const JobDetailModal: React.FC<JobDetailModalProps> = ({ 
+  job, 
+  isOpen, 
+  onClose, 
+  onMarkAsSeen,
+  onHideJob,
+  onUnhideJob
+}) => {
   const [language, setLanguage] = useState<'pt' | 'en'>('pt');
   const [translatedDescription, setTranslatedDescription] = useState<string>('');
   const [isTranslating, setIsTranslating] = useState<boolean>(false);
+
+  const blockedCheck = job ? checkJobForBlockedKeywords(job.title, job.description) : { isBlocked: false, matchedTerms: [] };
 
   useEffect(() => {
     if (job) {
@@ -158,6 +172,21 @@ export const JobDetailModal: React.FC<JobDetailModalProps> = ({ job, isOpen, onC
               )}
             </div>
 
+            {/* Alerta de Idiomas Estrangeiros / Termos Bloqueados */}
+            {blockedCheck.isBlocked && (
+              <div className="bg-amber-50 border border-amber-200 rounded-lg p-3.5 mb-4 flex items-start gap-2.5 text-xs text-amber-900">
+                <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                <div>
+                  <span className="font-bold text-amber-950">
+                    Atenção: Exigência de outro idioma ou termo identificado ({blockedCheck.matchedTerms.join(', ')})
+                  </span>
+                  <p className="mt-0.5 text-amber-800 leading-relaxed">
+                    O anúncio desta oportunidade menciona idiomas adicionais (como {blockedCheck.matchedTerms.join(', ')}). Vagas com esses termos são desqualificadas no filtro "Apenas Português".
+                  </p>
+                </div>
+              </div>
+            )}
+
             {/* AI Reason */}
             {analysis?.reason && (
               <div className="bg-white rounded-lg p-4 border border-slate-200 shadow-xs mb-4">
@@ -279,7 +308,37 @@ export const JobDetailModal: React.FC<JobDetailModalProps> = ({ job, isOpen, onC
           <div className="text-xs text-slate-500 hidden sm:block">
             Fonte Oficial: <span className="font-medium text-slate-700">{job.source_url || job.url}</span>
           </div>
-          <div className="flex items-center gap-2.5 w-full sm:w-auto">
+          <div className="flex items-center gap-2.5 w-full sm:w-auto flex-wrap sm:flex-nowrap">
+            {job.is_hidden ? (
+              onUnhideJob && (
+                <button
+                  onClick={() => {
+                    onUnhideJob(job.external_id);
+                    onClose();
+                  }}
+                  className="px-3.5 py-2.5 text-xs font-semibold text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-lg transition-colors flex items-center justify-center gap-1.5 flex-1 sm:flex-initial cursor-pointer"
+                  title="Restaurar vaga para exibição na lista principal"
+                >
+                  <Eye className="w-4 h-4 text-blue-600" />
+                  <span>Restaurar Vaga</span>
+                </button>
+              )
+            ) : (
+              onHideJob && (
+                <button
+                  onClick={() => {
+                    onHideJob(job.external_id);
+                    onClose();
+                  }}
+                  className="px-3.5 py-2.5 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-rose-50 hover:text-rose-700 hover:border-rose-200 border border-slate-200 rounded-lg transition-colors flex items-center justify-center gap-1.5 flex-1 sm:flex-initial cursor-pointer"
+                  title="Ocultar vaga da visualização no app sem removê-la do banco"
+                >
+                  <EyeOff className="w-4 h-4 text-slate-500 hover:text-rose-600" />
+                  <span>Ocultar Vaga</span>
+                </button>
+              )
+            )}
+
             {job.is_new && onMarkAsSeen && (
               <button 
                 onClick={() => {

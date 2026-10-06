@@ -16,7 +16,10 @@ import {
   ArrowUpRight,
   Clock,
   Eye,
-  Filter
+  EyeOff,
+  Filter,
+  RotateCcw,
+  X
 } from 'lucide-react';
 import { NormalizedJob } from '../connectors/base/types';
 import { JobOpportunity, Platform, JobAnalysis } from '../types/job';
@@ -28,9 +31,16 @@ import {
   processDatabaseUpdate, 
   markJobAsSeen, 
   markAllJobsAsSeen, 
+  hideJob,
+  unhideJob,
+  unhideAllJobs,
   getStoredSyncState,
   formatSyncDateTime
 } from '../services/jobsSyncService';
+import { 
+  checkJobForBlockedKeywords, 
+  getBlockedKeywords 
+} from '../services/blockedKeywordsService';
 
 interface JobSearchProps {
   jobs: JobOpportunity[];
@@ -143,22 +153,48 @@ export const JobSearch: React.FC<JobSearchProps> = ({
 
   // Estados dos filtros
   const [searchQuery, setSearchQuery] = useState('');
-  const [noEnglishOnly, setNoEnglishOnly] = useState(true);
+  const [onlyPortuguese, setOnlyPortuguese] = useState(true);
   const [selectedPlatform, setSelectedPlatform] = useState<string>('ALL');
   const [selectedEnglishStatus, setSelectedEnglishStatus] = useState<string>('ALL');
   const [minScore, setMinScore] = useState<number>(0);
   const [selectedJobForModal, setSelectedJobForModal] = useState<UnifiedJobWithStatus | null>(null);
 
-  // Modo de visualização: TODAS vs APENAS NOVAS vs BASE ANTERIOR
-  const [viewMode, setViewMode] = useState<'ALL' | 'NEW_ONLY' | 'EXISTING_ONLY'>('ALL');
+  // Palavras Proibidas / Termos de Outros Idiomas
+  const [blockedKeywords, setBlockedKeywords] = useState<string[]>(() => getBlockedKeywords());
 
-  // Quantidade de novas vagas
+  useEffect(() => {
+    const handler = (e: any) => {
+      if (e.detail && Array.isArray(e.detail)) {
+        setBlockedKeywords(e.detail);
+      } else {
+        setBlockedKeywords(getBlockedKeywords());
+      }
+    };
+    window.addEventListener('blocked-keywords-updated', handler);
+    return () => window.removeEventListener('blocked-keywords-updated', handler);
+  }, []);
+
+  // Modo de visualização: TODAS vs APENAS NOVAS vs BASE ANTERIOR vs OCULTADAS
+  const [viewMode, setViewMode] = useState<'ALL' | 'NEW_ONLY' | 'EXISTING_ONLY' | 'HIDDEN_ONLY'>('ALL');
+
+  // Toast temporário de vaga ocultada com ação de desfazer
+  const [hiddenToast, setHiddenToast] = useState<{ id: string; title: string } | null>(null);
+
+  // Quantidade de vagas ativas e ocultas
+  const activeJobsCount = useMemo(() => {
+    return jobsList.filter(j => !j.is_hidden).length;
+  }, [jobsList]);
+
   const newJobsCount = useMemo(() => {
-    return jobsList.filter(j => j.is_new).length;
+    return jobsList.filter(j => j.is_new && !j.is_hidden).length;
   }, [jobsList]);
 
   const existingJobsCount = useMemo(() => {
-    return jobsList.filter(j => !j.is_new).length;
+    return jobsList.filter(j => !j.is_new && !j.is_hidden).length;
+  }, [jobsList]);
+
+  const hiddenJobsCount = useMemo(() => {
+    return jobsList.filter(j => j.is_hidden).length;
   }, [jobsList]);
 
   // Sincroniza e atualiza o banco de dados
@@ -261,23 +297,72 @@ export const JobSearch: React.FC<JobSearchProps> = ({
     setSyncFeedback(null);
   };
 
+  // Oculta uma vaga (mantém no banco para sync, mas remove da visualização normal)
+  const handleHideJob = (jobId: string) => {
+    hideJob(jobId);
+    const targetJob = jobsList.find(j => j.external_id === jobId);
+    setJobsList(prev => prev.map(j => j.external_id === jobId ? { ...j, is_hidden: true } : j));
+    if (selectedJobForModal?.external_id === jobId) {
+      setSelectedJobForModal(null);
+    }
+    setHiddenToast({ id: jobId, title: targetJob?.title || 'Vaga' });
+    setTimeout(() => {
+      setHiddenToast(prev => prev?.id === jobId ? null : prev);
+    }, 6000);
+  };
+
+  // Restaura uma vaga que estava oculta
+  const handleUnhideJob = (jobId: string) => {
+    unhideJob(jobId);
+    setJobsList(prev => prev.map(j => j.external_id === jobId ? { ...j, is_hidden: false } : j));
+    if (selectedJobForModal?.external_id === jobId) {
+      setSelectedJobForModal(prev => prev ? { ...prev, is_hidden: false } : null);
+    }
+    if (hiddenToast?.id === jobId) {
+      setHiddenToast(null);
+    }
+  };
+
+  // Restaura todas as vagas ocultadas
+  const handleUnhideAllJobs = () => {
+    unhideAllJobs();
+    setJobsList(prev => prev.map(j => ({ ...j, is_hidden: false })));
+    setHiddenToast(null);
+  };
+
   // Filtra as vagas em tempo real
   const filteredJobs = useMemo(() => {
     return jobsList.filter(job => {
       const analysis = job.analysis;
 
-      // 0. Filtro de Separação de Novas Vagas vs Base Anterior
-      if (viewMode === 'NEW_ONLY' && !job.is_new) {
-        return false;
-      }
-      if (viewMode === 'EXISTING_ONLY' && job.is_new) {
-        return false;
+      // 0. Modo de Visualização de Ocultadas vs Não Ocultadas
+      if (viewMode === 'HIDDEN_ONLY') {
+        if (!job.is_hidden) return false;
+      } else {
+        // Nas outras abas, esconde as vagas marcadas como ocultas
+        if (job.is_hidden) return false;
+
+        // Filtro de Separação de Novas Vagas vs Base Anterior
+        if (viewMode === 'NEW_ONLY' && !job.is_new) {
+          return false;
+        }
+        if (viewMode === 'EXISTING_ONLY' && job.is_new) {
+          return false;
+        }
       }
 
-      // 1. Filtro Principal: "Não exige inglês obrigatório"
-      // Quando o usuário está na aba de "Novas Vagas", queremos exibir todas as novas oportunidades identificadas
-      if (viewMode !== 'NEW_ONLY' && noEnglishOnly && analysis?.english_status === 'REQUIRED') {
-        return false;
+      // 1. Filtro Principal: "🎯 Apenas Português (Sem exigência de outros idiomas)"
+      // Quando o usuário está na aba de "Novas Vagas" ou "Ocultadas", aplicamos apenas se marcado
+      if (viewMode !== 'NEW_ONLY' && viewMode !== 'HIDDEN_ONLY' && onlyPortuguese) {
+        // Se a IA marcou como exigindo inglês obrigatório
+        if (analysis?.english_status === 'REQUIRED') {
+          return false;
+        }
+        // Se o anúncio contém qualquer palavra proibida / menção a outros idiomas (ex: italiano, bilíngue, etc.)
+        const { isBlocked } = checkJobForBlockedKeywords(job.title, job.description, blockedKeywords);
+        if (isBlocked) {
+          return false;
+        }
       }
 
       // 2. Filtro de Status de Inglês Específico
@@ -296,7 +381,7 @@ export const JobSearch: React.FC<JobSearchProps> = ({
       }
 
       // 4. Score Mínimo (apenas para base geral ou quando definido acima de 0)
-      if (viewMode !== 'NEW_ONLY' && minScore > 0 && (analysis?.compatibility_score || 0) < minScore) {
+      if (viewMode !== 'NEW_ONLY' && viewMode !== 'HIDDEN_ONLY' && minScore > 0 && (analysis?.compatibility_score || 0) < minScore) {
         return false;
       }
 
@@ -312,7 +397,7 @@ export const JobSearch: React.FC<JobSearchProps> = ({
 
       return true;
     });
-  }, [jobsList, viewMode, noEnglishOnly, selectedEnglishStatus, selectedPlatform, minScore, searchQuery]);
+  }, [jobsList, viewMode, onlyPortuguese, blockedKeywords, selectedEnglishStatus, selectedPlatform, minScore, searchQuery]);
 
   // Helpers de estilo para selos de inglês
   const getBadgeStyle = (status?: string) => {
@@ -512,10 +597,51 @@ export const JobSearch: React.FC<JobSearchProps> = ({
         </div>
       )}
 
+      {/* BANNER DE VAGAS OCULTADAS (QUANDO MODO HIDDEN_ONLY ATIVO) */}
+      {viewMode === 'HIDDEN_ONLY' && (
+        <div className="bg-slate-900 border border-slate-800 p-4 sm:p-5 rounded-2xl flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4 shadow-md text-white">
+          <div className="flex items-center gap-3">
+            <span className="p-2.5 rounded-xl bg-slate-800 text-amber-400 border border-slate-700 shrink-0">
+              <EyeOff className="w-5 h-5" />
+            </span>
+            <div>
+              <div className="flex items-center gap-2">
+                <h4 className="text-sm font-bold text-white">
+                  Visualizando Vagas Ocultadas
+                </h4>
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                  {hiddenJobsCount} {hiddenJobsCount === 1 ? 'vaga' : 'vagas'}
+                </span>
+              </div>
+              <p className="text-xs text-slate-300 mt-0.5">
+                Essas vagas permanecem salvas na base para sincronização e histórico, mas não são exibidas na listagem principal.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              onClick={handleUnhideAllJobs}
+              className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold rounded-xl transition-all border border-slate-700 flex items-center gap-1.5 cursor-pointer"
+            >
+              <RotateCcw className="w-3.5 h-3.5 text-cyan-400" />
+              <span>Restaurar Todas</span>
+            </button>
+
+            <button
+              onClick={() => setViewMode('ALL')}
+              className="px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl transition-all flex items-center gap-1.5 cursor-pointer"
+            >
+              <span>Voltar à Lista Principal</span>
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Barra de Filtros, Modos de Separação e Busca */}
       <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-xs space-y-4">
         
-        {/* Linha 0: SEPARADOR DE NOVAS VAGAS VS BASE EXISTENTE */}
+        {/* Linha 0: SEPARADOR DE NOVAS VAGAS VS BASE EXISTENTE VS OCULTADAS */}
         <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 pb-3 border-b border-slate-100">
           <div className="flex items-center gap-1.5">
             <span className="text-xs font-semibold text-slate-700 flex items-center gap-1">
@@ -530,11 +656,11 @@ export const JobSearch: React.FC<JobSearchProps> = ({
               onClick={() => setViewMode('ALL')}
               className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-all whitespace-nowrap cursor-pointer ${
                 viewMode === 'ALL'
-                  ? 'bg-white text-slate-900 shadow-xs border border-slate-200/80'
+                  ? 'bg-white text-slate-900 shadow-xs border border-slate-200/80 font-bold'
                   : 'text-slate-600 hover:text-slate-900'
               }`}
             >
-              Todas as Vagas ({jobsList.length})
+              Todas as Vagas ({activeJobsCount})
             </button>
 
             <button
@@ -560,16 +686,31 @@ export const JobSearch: React.FC<JobSearchProps> = ({
               onClick={() => setViewMode('EXISTING_ONLY')}
               className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-all whitespace-nowrap cursor-pointer ${
                 viewMode === 'EXISTING_ONLY'
-                  ? 'bg-white text-slate-900 shadow-xs border border-slate-200/80'
+                  ? 'bg-white text-slate-900 shadow-xs border border-slate-200/80 font-bold'
                   : 'text-slate-600 hover:text-slate-900'
               }`}
             >
               Base Anterior ({existingJobsCount})
             </button>
+
+            {hiddenJobsCount > 0 && (
+              <button
+                onClick={() => setViewMode('HIDDEN_ONLY')}
+                className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-all whitespace-nowrap flex items-center gap-1.5 cursor-pointer ${
+                  viewMode === 'HIDDEN_ONLY'
+                    ? 'bg-slate-900 text-white shadow-xs font-bold'
+                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
+                }`}
+                title="Exibir vagas ocultadas da listagem principal"
+              >
+                <EyeOff className="w-3.5 h-3.5 text-amber-500" />
+                <span>Ocultadas ({hiddenJobsCount})</span>
+              </button>
+            )}
           </div>
         </div>
 
-        {/* Linha 1: Input de Busca e Toggle Principal "Não exige inglês" */}
+        {/* Linha 1: Input de Busca e Toggle Principal "Apenas Português" */}
         <div className="flex flex-col md:flex-row gap-4">
           <div className="relative flex-1">
             <Search className="w-5 h-5 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
@@ -582,23 +723,24 @@ export const JobSearch: React.FC<JobSearchProps> = ({
             />
           </div>
 
-          {/* Toggle Principal: Não exige inglês */}
+          {/* Toggle Principal: Apenas Português */}
           <div className="flex items-center gap-3 bg-slate-50 px-4 py-2 rounded-xl border border-slate-200 shrink-0">
-            <label htmlFor="noEnglishToggle" className="text-xs font-semibold text-slate-700 cursor-pointer select-none">
-              🎯 Apenas sem inglês obrigatório
+            <label htmlFor="onlyPortugueseToggle" className="text-xs font-semibold text-slate-700 cursor-pointer select-none">
+              🎯 Apenas Português (100% PT-BR)
             </label>
             <button
-              id="noEnglishToggle"
+              id="onlyPortugueseToggle"
               role="switch"
-              aria-checked={noEnglishOnly}
-              onClick={() => setNoEnglishOnly(prev => !prev)}
+              aria-checked={onlyPortuguese}
+              onClick={() => setOnlyPortuguese(prev => !prev)}
               className={`w-11 h-6 rounded-full transition-colors relative focus:outline-hidden focus:ring-2 focus:ring-blue-500 ${
-                noEnglishOnly ? 'bg-blue-600' : 'bg-slate-300'
+                onlyPortuguese ? 'bg-blue-600' : 'bg-slate-300'
               }`}
+              title="Exibe apenas vagas 100% em português, filtrando qualquer anúncio que exija inglês, italiano ou outros idiomas estrangeiros cadastrados."
             >
               <span 
                 className={`w-5 h-5 bg-white rounded-full absolute top-0.5 transition-transform ${
-                  noEnglishOnly ? 'left-5.5' : 'left-0.5'
+                  onlyPortuguese ? 'left-5.5' : 'left-0.5'
                 }`}
               />
             </button>
@@ -656,11 +798,16 @@ export const JobSearch: React.FC<JobSearchProps> = ({
 
           <div className="ml-auto text-slate-500 font-medium flex items-center gap-2">
             <span>
-              Exibindo <span className="font-bold text-slate-900">{filteredJobs.length}</span> de {jobsList.length} vagas
+              Exibindo <span className="font-bold text-slate-900">{filteredJobs.length}</span> de {viewMode === 'HIDDEN_ONLY' ? hiddenJobsCount : activeJobsCount} vagas
             </span>
             {viewMode === 'NEW_ONLY' && (
               <span className="text-[11px] font-bold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full">
                 Filtro de Novas Ativo
+              </span>
+            )}
+            {viewMode === 'HIDDEN_ONLY' && (
+              <span className="text-[11px] font-bold text-amber-800 bg-amber-100 px-2 py-0.5 rounded-full">
+                Exibindo Ocultadas
               </span>
             )}
           </div>
@@ -672,15 +819,21 @@ export const JobSearch: React.FC<JobSearchProps> = ({
         <div className="bg-white rounded-2xl p-12 text-center border border-slate-200 space-y-3">
           <Info className="w-10 h-10 text-slate-400 mx-auto" />
           <h3 className="text-base font-bold text-slate-800">
-            {viewMode === 'NEW_ONLY' ? 'Nenhuma vaga nova pendente' : 'Nenhuma oportunidade encontrada'}
+            {viewMode === 'NEW_ONLY' 
+              ? 'Nenhuma vaga nova pendente' 
+              : viewMode === 'HIDDEN_ONLY' 
+              ? 'Nenhuma vaga ocultada no momento' 
+              : 'Nenhuma oportunidade encontrada'}
           </h3>
           <p className="text-sm text-slate-500 max-w-md mx-auto">
             {viewMode === 'NEW_ONLY' 
               ? 'Todas as novas vagas já foram avaliadas ou marcadas como vistas. Você pode clicar em "Todas as Vagas" para ver a base completa ou em "Atualizar Banco de Vagas" para buscar novas oportunidades.'
-              : 'Tente desmarcar o filtro "Apenas sem inglês obrigatório" ou limpar os termos de busca para ver todas as vagas coletadas.'}
+              : viewMode === 'HIDDEN_ONLY'
+              ? 'Você ainda não ocultou nenhuma vaga. Quando quiser retirar alguma vaga da visualização no app, utilize o botão "Ocultar" no card.'
+              : 'Tente desmarcar o filtro "Apenas Português" ou limpar os termos de busca para ver todas as vagas coletadas.'}
           </p>
           <div className="flex items-center justify-center gap-2 pt-2">
-            {viewMode === 'NEW_ONLY' && (
+            {viewMode !== 'ALL' && (
               <button 
                 onClick={() => setViewMode('ALL')}
                 className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg transition-colors cursor-pointer"
@@ -691,7 +844,7 @@ export const JobSearch: React.FC<JobSearchProps> = ({
             <button 
               onClick={() => {
                 setViewMode('ALL');
-                setNoEnglishOnly(false);
+                setOnlyPortuguese(false);
                 setSelectedPlatform('ALL');
                 setSelectedEnglishStatus('ALL');
                 setMinScore(0);
@@ -709,23 +862,31 @@ export const JobSearch: React.FC<JobSearchProps> = ({
             const analysis = job.analysis;
             const badge = getBadgeStyle(analysis?.english_status);
             const score = analysis?.compatibility_score || 50;
+            const blockedCheck = checkJobForBlockedKeywords(job.title, job.description, blockedKeywords);
 
             return (
               <div 
                 key={job.external_id}
                 className={`rounded-2xl p-5 sm:p-6 border-2 transition-all flex flex-col md:flex-row md:items-center justify-between gap-5 group relative ${
-                  job.is_new 
+                  job.is_hidden
+                    ? 'bg-slate-50/80 border-slate-300 opacity-80 hover:opacity-100'
+                    : job.is_new 
                     ? 'bg-gradient-to-r from-emerald-50 via-teal-50/40 to-white border-emerald-500 shadow-lg shadow-emerald-500/10 ring-4 ring-emerald-500/20 border-l-8 border-l-emerald-600' 
                     : 'bg-white border-slate-300 hover:border-slate-400 shadow-xs hover:shadow-md'
                 }`}
               >
                 {/* Informações Principais da Vaga */}
                 <div className="space-y-2.5 flex-1">
-                  {/* Metadados Limpos com Selo de Vaga Nova */}
+                  {/* Metadados Limpos com Selo de Vaga Nova / Ocultada */}
                   <div className="flex items-center flex-wrap gap-2 text-xs">
                     
-                    {/* SELO DE IDENTIFICAÇÃO DE NOVA VAGA */}
-                    {job.is_new ? (
+                    {/* SELO DE IDENTIFICAÇÃO */}
+                    {job.is_hidden ? (
+                      <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md text-[11px] font-bold bg-amber-100 text-amber-900 border border-amber-300">
+                        <EyeOff className="w-3 h-3 text-amber-700" />
+                        <span>Ocultada no App</span>
+                      </span>
+                    ) : job.is_new ? (
                       <div className="flex items-center gap-2">
                         <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-black bg-emerald-600 text-white shadow-xs tracking-wide">
                           <Sparkles className="w-3.5 h-3.5 fill-white" />
@@ -782,10 +943,17 @@ export const JobSearch: React.FC<JobSearchProps> = ({
 
                   {/* Badges de Idioma e Compatibilidade */}
                   <div className="flex items-center flex-wrap gap-3 pt-1">
-                    <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold border ${badge.bg}`}>
-                      <span className={`w-2.5 h-2.5 rounded-full ${badge.dot}`} />
-                      {badge.label}
-                    </span>
+                    {blockedCheck.isBlocked ? (
+                      <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold border bg-rose-50 border-rose-200 text-rose-800" title={`Termos de outros idiomas identificados: ${blockedCheck.matchedTerms.join(', ')}`}>
+                        <span className="w-2.5 h-2.5 rounded-full bg-rose-500" />
+                        <span>Requer outro idioma: {blockedCheck.matchedTerms.slice(0, 2).join(', ')}</span>
+                      </span>
+                    ) : (
+                      <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold border ${badge.bg}`}>
+                        <span className={`w-2.5 h-2.5 rounded-full ${badge.dot}`} />
+                        {analysis?.english_status === 'NONE' ? '100% Português (PT-BR)' : badge.label}
+                      </span>
+                    )}
 
                     {analysis?.portuguese_required && (
                       <span className="inline-flex items-center gap-1 text-xs font-bold text-slate-800 bg-slate-100 border border-slate-300 px-3 py-1 rounded-full">
@@ -816,7 +984,7 @@ export const JobSearch: React.FC<JobSearchProps> = ({
                     </div>
 
                     {/* Botão de Marcar Como Vista (Inline no Card para Novas Vagas) */}
-                    {job.is_new && (
+                    {job.is_new && !job.is_hidden && (
                       <button
                         onClick={() => handleMarkAsSeen(job.external_id)}
                         className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 border border-emerald-700 transition-colors ml-auto cursor-pointer shadow-xs"
@@ -829,19 +997,42 @@ export const JobSearch: React.FC<JobSearchProps> = ({
                   </div>
                 </div>
 
-                {/* Ações: Ver Análise & Candidatar-se Oficial */}
+                {/* Ações: Ver Análise, Ocultar/Restaurar & Candidatar-se Oficial */}
                 <div className="flex md:flex-col items-center md:items-end justify-between gap-2.5 shrink-0 pt-3 md:pt-0 border-t md:border-t-0 border-slate-200">
-                  <button
-                    onClick={() => setSelectedJobForModal(job)}
-                    className={`px-4 py-2.5 text-xs font-bold rounded-xl transition-all flex items-center gap-1.5 w-full justify-center md:w-auto cursor-pointer ${
-                      job.is_new 
-                        ? 'bg-white hover:bg-slate-100 text-slate-900 border-2 border-slate-300 shadow-xs' 
-                        : 'bg-slate-100 hover:bg-slate-200 text-slate-800'
-                    }`}
-                  >
-                    <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
-                    <span>Ver Análise da IA</span>
-                  </button>
+                  <div className="flex items-center gap-2 w-full md:w-auto">
+                    <button
+                      onClick={() => setSelectedJobForModal(job)}
+                      className={`px-3.5 py-2.5 text-xs font-bold rounded-xl transition-all flex items-center gap-1.5 flex-1 md:flex-initial justify-center cursor-pointer ${
+                        job.is_new 
+                          ? 'bg-white hover:bg-slate-100 text-slate-900 border-2 border-slate-300 shadow-xs' 
+                          : 'bg-slate-100 hover:bg-slate-200 text-slate-800'
+                      }`}
+                    >
+                      <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
+                      <span>Ver Análise da IA</span>
+                    </button>
+
+                    {/* BOTÃO OCULTAR / RESTAURAR */}
+                    {job.is_hidden ? (
+                      <button
+                        onClick={() => handleUnhideJob(job.external_id)}
+                        className="px-3 py-2.5 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 text-xs font-semibold rounded-xl transition-all flex items-center gap-1.5 cursor-pointer"
+                        title="Restaurar esta vaga para a lista principal"
+                      >
+                        <Eye className="w-3.5 h-3.5 text-blue-600" />
+                        <span>Restaurar</span>
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => handleHideJob(job.external_id)}
+                        className="px-3 py-2.5 bg-slate-100 hover:bg-rose-50 hover:text-rose-700 hover:border-rose-200 border border-slate-200 text-slate-600 text-xs font-medium rounded-xl transition-all flex items-center gap-1.5 cursor-pointer"
+                        title="Ocultar esta vaga da visualização no app (permanece salva no banco para sincronização)"
+                      >
+                        <EyeOff className="w-3.5 h-3.5 text-slate-500 hover:text-rose-600" />
+                        <span>Ocultar</span>
+                      </button>
+                    )}
+                  </div>
 
                   <a 
                     href={job.canonical_url || job.url}
@@ -859,12 +1050,42 @@ export const JobSearch: React.FC<JobSearchProps> = ({
         </div>
       )}
 
+      {/* TOAST DE FEEDBACK DE VAGA OCULTADA COM DESFAZER */}
+      {hiddenToast && (
+        <div className="fixed bottom-6 right-6 z-50 bg-slate-900 text-white border border-slate-700 px-4 py-3 rounded-2xl shadow-2xl flex items-center gap-3.5 animate-in slide-in-from-bottom-5 duration-200 max-w-md">
+          <div className="flex items-center gap-2 text-xs flex-1 min-w-0">
+            <EyeOff className="w-4 h-4 text-amber-400 shrink-0" />
+            <span className="truncate">
+              Vaga ocultada no app: <strong className="text-slate-100 font-semibold">{hiddenToast.title}</strong>
+            </span>
+          </div>
+          <div className="flex items-center gap-2 shrink-0 pl-2 border-l border-slate-700">
+            <button
+              onClick={() => handleUnhideJob(hiddenToast.id)}
+              className="px-2.5 py-1 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded-lg transition-colors flex items-center gap-1 cursor-pointer"
+            >
+              <RotateCcw className="w-3 h-3" />
+              <span>Desfazer</span>
+            </button>
+            <button
+              onClick={() => setHiddenToast(null)}
+              className="p-1 text-slate-400 hover:text-white rounded-lg transition-colors cursor-pointer"
+              title="Fechar"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Modal de Detalhes da Vaga */}
       <JobDetailModal 
         job={selectedJobForModal}
         isOpen={Boolean(selectedJobForModal)}
         onClose={() => setSelectedJobForModal(null)}
         onMarkAsSeen={handleMarkAsSeen}
+        onHideJob={handleHideJob}
+        onUnhideJob={handleUnhideJob}
       />
     </div>
   );
