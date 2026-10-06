@@ -220,80 +220,82 @@ jobs:
           })}
         </div>
 
-        {/* GitHub Actions Cron Card */}
+        {/* Vercel Webhook & Cron Card */}
         <div className="bg-slate-950 p-5 rounded-xl border border-slate-800/80 space-y-4">
           <div className="flex items-center justify-between flex-wrap gap-2">
             <div className="flex items-center gap-2 text-xs font-semibold text-slate-300">
               <Calendar className="w-4 h-4 text-emerald-400" />
-              <span>Agendamento Automático no GitHub Actions</span>
+              <span>URL do Webhook de Coleta Automática (Vercel)</span>
             </div>
-            <button
-              onClick={handleCopyWorkflow}
-              className="px-3.5 py-2 bg-blue-600 hover:bg-blue-500 text-xs font-semibold text-white rounded-lg shadow-xs flex items-center gap-2 transition-all cursor-pointer"
-            >
-              {copiedWorkflow ? (
-                <>
-                  <Check className="w-4 h-4 text-white" />
-                  <span className="text-white font-bold">Código Copiado!</span>
-                </>
-              ) : (
-                <>
-                  <Copy className="w-4 h-4" />
-                  <span>Copiar Workflow com {intervalHours}h</span>
-                </>
-              )}
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => {
+                  const url = `${window.location.origin}/api/cron`;
+                  navigator.clipboard.writeText(url);
+                  setCopiedWorkflow(true);
+                  setTimeout(() => setCopiedWorkflow(false), 3000);
+                }}
+                className="px-3.5 py-2 bg-blue-600 hover:bg-blue-500 text-xs font-semibold text-white rounded-lg shadow-xs flex items-center gap-2 transition-all cursor-pointer"
+              >
+                {copiedWorkflow ? (
+                  <>
+                    <Check className="w-4 h-4 text-white" />
+                    <span className="text-white font-bold">URL Copiada!</span>
+                  </>
+                ) : (
+                  <>
+                    <Copy className="w-4 h-4" />
+                    <span>Copiar URL do Webhook</span>
+                  </>
+                )}
+              </button>
+            </div>
           </div>
 
-          <p className="text-xs text-slate-400 leading-relaxed">
-            O arquivo de automação no GitHub executará a cada <strong>{intervalHours} hora{intervalHours > 1 ? 's' : ''}</strong> (expressão cron: <code className="text-cyan-300 font-mono bg-slate-900 px-1 py-0.5 rounded">{getCronExpression(intervalHours)}</code>).
-          </p>
+          <div className="bg-slate-900/90 p-3 rounded-lg border border-slate-800 flex items-center justify-between gap-3 flex-wrap">
+            <div className="font-mono text-xs text-cyan-300 select-all truncate">
+              {typeof window !== 'undefined' ? `${window.location.origin}/api/cron` : 'https://seu-app.vercel.app/api/cron'}
+            </div>
+            <span className="text-[10px] font-semibold text-emerald-400 bg-emerald-950/80 px-2 py-0.5 rounded border border-emerald-800">
+              Endpoint Ativo
+            </span>
+          </div>
 
-          {/* Guia Passo a Passo Visual */}
+          {/* Duas Opções de Agendamento */}
           <div className="mt-4 pt-4 border-t border-slate-900 space-y-3">
             <h4 className="text-xs font-bold text-slate-200 uppercase tracking-wider flex items-center gap-1.5">
-              <span>📋 Como ativar no seu GitHub (Passo a Passo Rápido):</span>
+              <span>🚀 Como Funciona o Agendamento Sem Precisar do GitHub Actions:</span>
             </h4>
 
-            <ol className="space-y-2.5 text-xs text-slate-300">
-              <li className="flex items-start gap-2.5 bg-slate-900/60 p-2.5 rounded-lg border border-slate-800/60">
-                <span className="w-5 h-5 rounded-full bg-blue-950 border border-blue-800 text-blue-400 font-bold flex items-center justify-center shrink-0 text-[11px]">1</span>
-                <div>
-                  Clique no botão azul <strong>"Copiar Workflow com {intervalHours}h"</strong> acima.
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
+              {/* Opção 1: Nativo Vercel */}
+              <div className="bg-slate-900/60 p-3.5 rounded-xl border border-slate-800/80 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-white flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-emerald-400" />
+                    1. Nativo da Vercel (1x por dia)
+                  </span>
+                  <span className="text-[10px] font-mono bg-slate-950 px-2 py-0.5 rounded text-slate-400">100% Automático</span>
                 </div>
-              </li>
+                <p className="text-[11px] text-slate-400 leading-relaxed">
+                  Já configurado no seu arquivo <code className="text-cyan-300 font-mono">vercel.json</code>. A própria Vercel chama o <code className="text-cyan-300 font-mono">/api/cron</code> todos os dias às 21:00 (Horário de Brasília) sem você precisar configurar nada extra.
+                </p>
+              </div>
 
-              <li className="flex items-start gap-2.5 bg-slate-900/60 p-2.5 rounded-lg border border-slate-800/60">
-                <span className="w-5 h-5 rounded-full bg-blue-950 border border-blue-800 text-blue-400 font-bold flex items-center justify-center shrink-0 text-[11px]">2</span>
-                <div>
-                  No seu repositório no GitHub, clique no botão <strong>"Add file"</strong> ➔ <strong>"Create new file"</strong>.
+              {/* Opção 2: cron-job.org para 6h ou 12h */}
+              <div className="bg-slate-900/60 p-3.5 rounded-xl border border-slate-800/80 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-white flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-blue-400" />
+                    2. Para 6h ou 12h (Via cron-job.org)
+                  </span>
+                  <span className="text-[10px] font-mono bg-blue-950 text-blue-300 px-2 py-0.5 rounded border border-blue-800">Gratuito</span>
                 </div>
-              </li>
-
-              <li className="flex items-start gap-2.5 bg-slate-900/60 p-2.5 rounded-lg border border-slate-800/60">
-                <span className="w-5 h-5 rounded-full bg-blue-950 border border-blue-800 text-blue-400 font-bold flex items-center justify-center shrink-0 text-[11px]">3</span>
-                <div>
-                  No campo do nome do arquivo, cole exatamente este caminho:
-                  <div className="mt-1 font-mono text-[11px] bg-slate-950 border border-slate-800 text-cyan-300 p-1.5 rounded select-all">
-                    .github/workflows/pipeline-cron.yml
-                  </div>
-                </div>
-              </li>
-
-              <li className="flex items-start gap-2.5 bg-slate-900/60 p-2.5 rounded-lg border border-slate-800/60">
-                <span className="w-5 h-5 rounded-full bg-blue-950 border border-blue-800 text-blue-400 font-bold flex items-center justify-center shrink-0 text-[11px]">4</span>
-                <div>
-                  No corpo do arquivo, dê <strong>Colar (Ctrl+V)</strong> e clique no botão verde <strong>"Commit changes"</strong>.
-                </div>
-              </li>
-
-              <li className="flex items-start gap-2.5 bg-slate-900/60 p-2.5 rounded-lg border border-slate-800/60">
-                <span className="w-5 h-5 rounded-full bg-emerald-950 border border-emerald-800 text-emerald-400 font-bold flex items-center justify-center shrink-0 text-[11px]">5</span>
-                <div>
-                  <strong className="text-emerald-400">Configurar Chave da IA (Segredo):</strong> No GitHub, vá em <strong>Settings ➔ Secrets and variables ➔ Actions</strong>, clique em <strong>"New repository secret"</strong>, crie o nome <code className="text-white font-mono bg-slate-950 px-1 py-0.5 rounded">GEMINI_API_KEY</code> e cole sua chave do Google AI Studio.
-                </div>
-              </li>
-            </ol>
+                <p className="text-[11px] text-slate-400 leading-relaxed">
+                  Para rodar com intervalos menores no plano gratuito da Vercel, acesse o <strong className="text-white">cron-job.org</strong>, cole a URL copiada acima e escolha "A cada 12 horas". Ele dispara a Vercel na hora exata, sem nenhuma fila!
+                </p>
+              </div>
+            </div>
           </div>
         </div>
       </div>
