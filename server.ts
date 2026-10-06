@@ -6,6 +6,7 @@ import dotenv from 'dotenv';
 import { GoogleGenAI, Type } from '@google/genai';
 import { matchKnownPlatform, inferPlatformDefaults, extractCleanDomain } from './src/services/platformKnowledge';
 import { WelocalizeConnector } from './src/connectors/welocalize';
+import { TuringConnector } from './src/connectors/turing';
 
 dotenv.config();
 
@@ -115,7 +116,7 @@ ANALISE A PLATFORMA E RETORNE EXATAMENTE O OBJETO JSON com as seguintes regras:
 12. "notes": Resumo estratégico em português brasileiro com dicas práticas de contratação, como funciona o teste, projetos em PT-BR e orientações para o candidato ser aceito.`;
 
         const response = await ai.models.generateContent({
-          model: 'gemini-3.8-flash',
+          model: 'gemini-2.5-flash',
           contents: prompt,
           config: {
             temperature: 0.2,
@@ -213,12 +214,27 @@ ANALISE A PLATFORMA E RETORNE EXATAMENTE O OBJETO JSON com as seguintes regras:
   app.post('/api/jobs/sync', async (req, res) => {
     try {
       const welocalize = new WelocalizeConnector();
-      const rawJobs = await welocalize.getJobs().catch(() => []);
-      const normalized = rawJobs.map(j => welocalize.normalizeJob(j));
+      const turing = new TuringConnector();
+      
+      const [wRaw, tRaw] = await Promise.all([
+        welocalize.getJobs().catch(e => {
+          console.warn('[Sync API] Welocalize fetch error:', e?.message);
+          return [];
+        }),
+        turing.getJobs().catch(e => {
+          console.warn('[Sync API] Turing fetch error:', e?.message);
+          return [];
+        })
+      ]);
+
+      const wNorm = wRaw.map(j => welocalize.normalizeJob(j));
+      const tNorm = tRaw.map(j => turing.normalizeJob(j));
+      const combined = [...wNorm, ...tNorm];
+
       return res.json({
         success: true,
-        jobs: normalized,
-        total: normalized.length,
+        jobs: combined,
+        total: combined.length,
         timestamp: new Date().toISOString()
       });
     } catch (e: any) {
@@ -242,7 +258,7 @@ ANALISE A PLATFORMA E RETORNE EXATAMENTE O OBJETO JSON com as seguintes regras:
     if (geminiApiKey) {
       try {
         const response = await ai.models.generateContent({
-          model: 'gemini-3.8-flash',
+          model: 'gemini-2.5-flash',
           contents: `Você é um tradutor profissional especializado em vagas de emprego internacionais na área de tecnologia, inteligência artificial e trabalho remoto.
 Traduza o seguinte texto de descrição de vaga fielmente para o Português do Brasil (pt-BR).
 Mantenha a formatação original em tópicos, parágrafos e clareza.

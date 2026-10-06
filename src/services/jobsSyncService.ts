@@ -21,6 +21,36 @@ export interface SyncState {
 }
 
 /**
+ * Formata data e hora da última sincronização no padrão brasileiro
+ * Exemplo: 06/10/2026 às 10:35
+ */
+export function formatSyncDateTime(isoDate?: string | null): string {
+  if (!isoDate) {
+    const now = new Date();
+    const date = now.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+    const time = now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+    return `${date} às ${time}`;
+  }
+  try {
+    const d = new Date(isoDate);
+    if (isNaN(d.getTime())) {
+      const now = new Date();
+      const date = now.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+      const time = now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+      return `${date} às ${time}`;
+    }
+    const date = d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+    const time = d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+    return `${date} às ${time}`;
+  } catch {
+    const now = new Date();
+    const date = now.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+    const time = now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+    return `${date} às ${time}`;
+  }
+}
+
+/**
  * Lê o estado armazenado localmente
  */
 export function getStoredSyncState(): SyncState {
@@ -69,17 +99,15 @@ export function saveSyncState(state: SyncState): void {
 export function applyNewJobFlags(jobs: UnifiedJobWithStatus[]): UnifiedJobWithStatus[] {
   let state = getStoredSyncState();
 
-  // Se for a primeira inicialização absoluta no navegador, define o baseline
+  // Se for a primeira inicialização no navegador, define o baseline com as vagas existentes
   if (state.knownIds.size === 0 && jobs.length > 0) {
     const allIds = new Set(jobs.map(j => j.external_id));
-    // Destaca as 3 primeiras vagas mais recentes como "Novas" inicialmente para feedback imediato
-    const initialNewIds = new Set(jobs.slice(0, 3).map(j => j.external_id));
     
     state = {
       knownIds: allIds,
-      newIds: initialNewIds,
+      newIds: new Set(),
       seenIds: new Set(),
-      lastSyncAt: new Date().toISOString()
+      lastSyncAt: state.lastSyncAt || new Date().toISOString()
     };
     saveSyncState(state);
   }
@@ -195,117 +223,3 @@ export function markAllJobsAsSeen(): void {
   state.newIds.clear();
   saveSyncState(state);
 }
-
-/**
- * Vagas simuladas de alta compatibilidade para teste imediato de atualização
- */
-export const SAMPLE_FRESH_JOBS: UnifiedJobWithStatus[] = [
-  {
-    external_id: 'fresh-alignerr-pt-01',
-    platform_slug: 'alignerr',
-    title: 'AI Prompt Evaluator & Writer - Brazilian Portuguese',
-    company: 'Alignerr / Labelbox',
-    url: 'https://www.alignerr.com/',
-    canonical_url: 'https://www.alignerr.com/',
-    source_url: 'https://www.alignerr.com/',
-    description: 'Avaliação de respostas e raciocínio de modelos avançados de IA em Português do Brasil. Trabalho 100% assíncrono e remoto com remuneração em Dólar ($ USD). Sem reuniões ou entrevistas orais em inglês.',
-    country: 'Brasil',
-    location: '100% Remoto (Brasil)',
-    remote: true,
-    employment_type: 'Freelance / Contratado',
-    salary_min: 15,
-    salary_max: 30,
-    salary_currency: 'USD',
-    published_at: new Date().toISOString(),
-    analysis: {
-      english_status: 'PARTIAL',
-      portuguese_required: true,
-      portuguese_level: 'NATIVE',
-      brazil_eligible: true,
-      remote_eligible: true,
-      job_category: 'AI',
-      experience_level: 'ENTRY',
-      salary_detected: true,
-      salary_min: 15,
-      salary_max: 30,
-      salary_currency: 'USD',
-      compatibility_score: 96,
-      confidence: 95,
-      reason: 'Excelente oportunidade recém-descoberta: trabalho 100% em português brasileiro com pagamento em dólar. Avaliação por testes práticos na plataforma sem entrevista falada.',
-      analysis_version: 'v1',
-      analyzed_at: new Date().toISOString()
-    }
-  },
-  {
-    external_id: 'fresh-mindrift-writer-02',
-    platform_slug: 'mindrift',
-    title: 'AI Tutor & Content Writer - Português Brasileiro',
-    company: 'Mindrift',
-    url: 'https://mindrift.ai/',
-    canonical_url: 'https://mindrift.ai/',
-    source_url: 'https://mindrift.ai/',
-    description: 'Redação e revisão de textos e respostas em português natural para refinamento de grandes modelos de linguagem (LLMs). Pagamento semanal em Dólar. Processo 100% online.',
-    country: 'Brasil',
-    location: 'Remoto (Brasil)',
-    remote: true,
-    employment_type: 'Freelance',
-    salary_min: 12,
-    salary_max: 22,
-    salary_currency: 'USD',
-    published_at: new Date().toISOString(),
-    analysis: {
-      english_status: 'PARTIAL',
-      portuguese_required: true,
-      portuguese_level: 'NATIVE',
-      brazil_eligible: true,
-      remote_eligible: true,
-      job_category: 'AI',
-      experience_level: 'ENTRY',
-      salary_detected: true,
-      salary_min: 12,
-      salary_max: 22,
-      salary_currency: 'USD',
-      compatibility_score: 93,
-      confidence: 90,
-      reason: 'Nova oportunidade adicionada: criação e curadoria de conteúdo em português para IA. Seleção por teste de escrita assíncrono.',
-      analysis_version: 'v1',
-      analyzed_at: new Date().toISOString()
-    }
-  },
-  {
-    external_id: 'fresh-welo-search-rater-03',
-    platform_slug: 'welocalize',
-    title: 'Media Search Quality Rater - Português do Brasil (Edição Recente)',
-    company: 'Welocalize / Welo Data',
-    url: 'https://www.welocalize.com/careers/',
-    canonical_url: 'https://www.welocalize.com/careers/',
-    source_url: 'https://www.welocalize.com/careers/',
-    description: 'Nova vaga aberta para avaliação de qualidade de busca e resultados de mídia para o mercado brasileiro. Horários livres de 10 a 20h/semana.',
-    country: 'Brasil',
-    location: '100% Remoto (Brasil)',
-    remote: true,
-    employment_type: 'Contract',
-    salary_min: 5,
-    salary_max: 10,
-    salary_currency: 'USD',
-    published_at: new Date().toISOString(),
-    analysis: {
-      english_status: 'NONE',
-      portuguese_required: true,
-      portuguese_level: 'NATIVE',
-      brazil_eligible: true,
-      remote_eligible: true,
-      job_category: 'ANNOTATION',
-      experience_level: 'ENTRY',
-      salary_detected: true,
-      salary_min: 5,
-      salary_max: 10,
-      salary_currency: 'USD',
-      compatibility_score: 98,
-      confidence: 92,
-      reason: 'Vaga prioritária recém-chegada: todo o trabalho e critérios de avaliação são focados no público brasileiro. Sem nenhuma entrevista falada.',
-      analysis_version: 'v1',
-      analyzed_at: new Date().toISOString()
-    }
-  }
-];

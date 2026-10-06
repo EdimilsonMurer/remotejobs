@@ -28,7 +28,8 @@ import {
   processDatabaseUpdate, 
   markJobAsSeen, 
   markAllJobsAsSeen, 
-  getStoredSyncState 
+  getStoredSyncState,
+  formatSyncDateTime
 } from '../services/jobsSyncService';
 
 interface JobSearchProps {
@@ -137,9 +138,7 @@ export const JobSearch: React.FC<JobSearchProps> = ({
 
   const [lastSyncFormatted, setLastSyncFormatted] = useState<string>(() => {
     const st = getStoredSyncState();
-    return st.lastSyncAt 
-      ? new Date(st.lastSyncAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) 
-      : 'Hoje';
+    return formatSyncDateTime(st.lastSyncAt);
   });
 
   // Estados dos filtros
@@ -207,8 +206,8 @@ export const JobSearch: React.FC<JobSearchProps> = ({
         console.warn('[Sync] Falha ao consultar endpoint remoto, mesclando base local:', err);
       }
 
-      const timeStr = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
-      setLastSyncFormatted(timeStr);
+      const nowIso = new Date().toISOString();
+      setLastSyncFormatted(formatSyncDateTime(nowIso));
 
       if (incomingJobs.length > 0) {
         // Processa a atualização identificando o que é estritamente novo
@@ -276,7 +275,8 @@ export const JobSearch: React.FC<JobSearchProps> = ({
       }
 
       // 1. Filtro Principal: "Não exige inglês obrigatório"
-      if (noEnglishOnly && analysis?.english_status === 'REQUIRED') {
+      // Quando o usuário está na aba de "Novas Vagas", queremos exibir todas as novas oportunidades identificadas
+      if (viewMode !== 'NEW_ONLY' && noEnglishOnly && analysis?.english_status === 'REQUIRED') {
         return false;
       }
 
@@ -295,8 +295,8 @@ export const JobSearch: React.FC<JobSearchProps> = ({
         }
       }
 
-      // 4. Score Mínimo
-      if (minScore > 0 && (analysis?.compatibility_score || 0) < minScore) {
+      // 4. Score Mínimo (apenas para base geral ou quando definido acima de 0)
+      if (viewMode !== 'NEW_ONLY' && minScore > 0 && (analysis?.compatibility_score || 0) < minScore) {
         return false;
       }
 
@@ -372,20 +372,27 @@ export const JobSearch: React.FC<JobSearchProps> = ({
             </p>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2.5 shrink-0">
-            {/* Botão Principal: Atualizar Banco de Dados */}
-            <button 
-              onClick={handleSyncDatabase}
-              disabled={isSyncingDatabase}
-              className="px-4 py-2.5 bg-cyan-400 hover:bg-cyan-300 disabled:bg-cyan-600/50 text-slate-950 text-xs font-bold rounded-xl transition-all shadow-md flex items-center gap-2 cursor-pointer active:scale-95"
-            >
-              <RefreshCw className={`w-4 h-4 ${isSyncingDatabase ? 'animate-spin' : ''}`} />
-              <span>{isSyncingDatabase ? 'Atualizando Banco...' : 'Atualizar Banco de Vagas'}</span>
-            </button>
+          <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 shrink-0">
+            {/* Informação e Botão Principal: Atualizar Banco de Dados */}
+            <div className="flex flex-col items-start sm:items-end gap-1.5 w-full sm:w-auto">
+              <button 
+                onClick={handleSyncDatabase}
+                disabled={isSyncingDatabase}
+                className="w-full sm:w-auto px-4 py-2.5 bg-cyan-400 hover:bg-cyan-300 disabled:bg-cyan-600/50 text-slate-950 text-xs font-bold rounded-xl transition-all shadow-md flex items-center justify-center gap-2 cursor-pointer active:scale-95"
+              >
+                <RefreshCw className={`w-4 h-4 ${isSyncingDatabase ? 'animate-spin' : ''}`} />
+                <span>{isSyncingDatabase ? 'Atualizando Banco...' : 'Atualizar Banco de Vagas'}</span>
+              </button>
+
+              <div className="text-[11px] text-cyan-200/90 flex items-center gap-1 font-medium bg-white/10 px-2.5 py-0.5 rounded-full border border-white/10">
+                <Clock className="w-3 h-3 text-cyan-300 shrink-0" />
+                <span>Última atualização: <strong className="text-white">{lastSyncFormatted}</strong></span>
+              </div>
+            </div>
 
             <button 
               onClick={onOpenGuides}
-              className="px-3 py-2.5 bg-white/10 hover:bg-white/20 text-white text-xs font-semibold rounded-xl border border-white/20 transition-colors flex items-center gap-1.5 cursor-pointer"
+              className="px-3 py-2.5 bg-white/10 hover:bg-white/20 text-white text-xs font-semibold rounded-xl border border-white/20 transition-colors flex items-center gap-1.5 cursor-pointer self-stretch sm:self-auto justify-center"
             >
               <BookOpen className="w-4 h-4 text-cyan-300" />
               <span>Guia</span>
@@ -417,10 +424,10 @@ export const JobSearch: React.FC<JobSearchProps> = ({
             </div>
           </div>
           <div className="bg-white/5 rounded-lg p-2.5">
-            <div className="text-blue-200/80">Última Sincronização</div>
-            <div className="font-semibold text-cyan-300 mt-0.5 flex items-center gap-1">
-              <Clock className="w-3 h-3" />
-              {lastSyncFormatted}
+            <div className="text-blue-200/80">Data e Hora da Última Atualização</div>
+            <div className="font-semibold text-cyan-300 mt-0.5 flex items-center gap-1.5">
+              <Clock className="w-3.5 h-3.5 text-cyan-300 shrink-0" />
+              <span className="font-bold">{lastSyncFormatted}</span>
             </div>
           </div>
         </div>
@@ -706,38 +713,45 @@ export const JobSearch: React.FC<JobSearchProps> = ({
             return (
               <div 
                 key={job.external_id}
-                className={`rounded-2xl p-5 border transition-all flex flex-col md:flex-row md:items-center justify-between gap-5 group relative ${
+                className={`rounded-2xl p-5 sm:p-6 border-2 transition-all flex flex-col md:flex-row md:items-center justify-between gap-5 group relative ${
                   job.is_new 
-                    ? 'bg-emerald-500/[0.04] border-emerald-400 ring-2 ring-emerald-400/20 shadow-md' 
-                    : 'bg-white border-slate-200 hover:border-slate-300 shadow-xs hover:shadow-md'
+                    ? 'bg-gradient-to-r from-emerald-50 via-teal-50/40 to-white border-emerald-500 shadow-lg shadow-emerald-500/10 ring-4 ring-emerald-500/20 border-l-8 border-l-emerald-600' 
+                    : 'bg-white border-slate-300 hover:border-slate-400 shadow-xs hover:shadow-md'
                 }`}
               >
                 {/* Informações Principais da Vaga */}
-                <div className="space-y-2 flex-1">
+                <div className="space-y-2.5 flex-1">
                   {/* Metadados Limpos com Selo de Vaga Nova */}
-                  <div className="flex items-center flex-wrap gap-2 text-xs text-slate-500">
+                  <div className="flex items-center flex-wrap gap-2 text-xs">
                     
                     {/* SELO DE IDENTIFICAÇÃO DE NOVA VAGA */}
                     {job.is_new ? (
-                      <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-emerald-500 text-slate-950 shadow-xs animate-pulse">
-                        <Sparkles className="w-3 h-3 fill-slate-950" />
-                        <span>NOVA VAGA</span>
-                      </span>
+                      <div className="flex items-center gap-2">
+                        <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-black bg-emerald-600 text-white shadow-xs tracking-wide">
+                          <Sparkles className="w-3.5 h-3.5 fill-white" />
+                          <span>NOVA VAGA RECÉM-ADICIONADA</span>
+                        </span>
+                        <span className="text-[11px] font-bold text-emerald-950 bg-emerald-100 border border-emerald-300 px-2 py-0.5 rounded-md">
+                          Atenção Prioritária
+                        </span>
+                      </div>
                     ) : (
-                      <span className="text-[10px] text-slate-400 font-medium">
+                      <span className="text-xs text-slate-500 font-medium">
                         Na base
                       </span>
                     )}
 
-                    <span className="font-bold text-blue-600 uppercase tracking-wider">{job.platform_slug}</span>
-                    <span aria-hidden="true">·</span>
-                    <span className="font-medium text-slate-700">{job.company}</span>
-                    <span aria-hidden="true">·</span>
-                    <span>{job.location}</span>
+                    <span className="font-bold text-blue-700 uppercase tracking-wider">{job.platform_slug}</span>
+                    <span aria-hidden="true" className="text-slate-400">·</span>
+                    <span className="font-bold text-slate-900">{job.company}</span>
+                    <span aria-hidden="true" className="text-slate-400">·</span>
+                    <span className="text-slate-700 font-medium">{job.location}</span>
                     {job.remote && (
                       <>
-                        <span aria-hidden="true">·</span>
-                        <span className="text-emerald-700 font-medium">100% Remoto</span>
+                        <span aria-hidden="true" className="text-slate-400">·</span>
+                        <span className="text-emerald-800 font-bold bg-emerald-100/80 px-2 py-0.5 rounded-md border border-emerald-200">
+                          100% Remoto
+                        </span>
                       </>
                     )}
                   </div>
@@ -745,53 +759,57 @@ export const JobSearch: React.FC<JobSearchProps> = ({
                   {/* Título da Vaga */}
                   <h3 
                     onClick={() => setSelectedJobForModal(job)}
-                    className="text-base sm:text-lg font-bold text-slate-900 group-hover:text-blue-600 transition-colors cursor-pointer leading-snug flex items-center gap-2"
+                    className={`text-base sm:text-lg font-black transition-colors cursor-pointer leading-snug flex items-center gap-2 ${
+                      job.is_new ? 'text-slate-950 hover:text-emerald-700' : 'text-slate-900 hover:text-blue-600'
+                    }`}
                   >
                     <span>{job.title}</span>
                   </h3>
 
                   {/* Diagnóstico da IA curto */}
                   {analysis?.reason && (
-                    <p className={`text-xs line-clamp-2 leading-relaxed p-2.5 rounded-lg border ${
+                    <p className={`text-xs leading-relaxed p-3 rounded-xl border ${
                       job.is_new 
-                        ? 'bg-emerald-950/5 border-emerald-200/80 text-emerald-950' 
-                        : 'bg-slate-50 border-slate-100 text-slate-600'
+                        ? 'bg-white border-emerald-300 text-slate-900 font-medium shadow-2xs' 
+                        : 'bg-slate-50 border-slate-200 text-slate-700'
                     }`}>
-                      <span className="font-semibold text-slate-800">Diagnóstico IA: </span>
+                      <span className={`font-bold ${job.is_new ? 'text-emerald-900' : 'text-slate-900'}`}>
+                        Diagnóstico IA: 
+                      </span>{' '}
                       {analysis.reason}
                     </p>
                   )}
 
                   {/* Badges de Idioma e Compatibilidade */}
                   <div className="flex items-center flex-wrap gap-3 pt-1">
-                    <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold border ${badge.bg}`}>
-                      <span className={`w-2 h-2 rounded-full ${badge.dot}`} />
+                    <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold border ${badge.bg}`}>
+                      <span className={`w-2.5 h-2.5 rounded-full ${badge.dot}`} />
                       {badge.label}
                     </span>
 
                     {analysis?.portuguese_required && (
-                      <span className="inline-flex items-center gap-1 text-xs font-medium text-slate-600 bg-slate-100 px-2.5 py-1 rounded-full">
+                      <span className="inline-flex items-center gap-1 text-xs font-bold text-slate-800 bg-slate-100 border border-slate-300 px-3 py-1 rounded-full">
                         🇧🇷 Português {analysis.portuguese_level ? `(${analysis.portuguese_level})` : 'Requerido'}
                       </span>
                     )}
 
                     {/* Barra de Compatibilidade */}
                     <div className="flex items-center gap-2 text-xs">
-                      <span className="text-slate-500">Compatibilidade:</span>
-                      <div className="w-16 h-2 bg-slate-100 rounded-full overflow-hidden">
+                      <span className="text-slate-600 font-medium">Compatibilidade:</span>
+                      <div className="w-16 h-2.5 bg-slate-200 rounded-full overflow-hidden border border-slate-300/60">
                         <div 
                           className={`h-full rounded-full ${
-                            score >= 80 ? 'bg-emerald-500' :
+                            score >= 80 ? 'bg-emerald-600' :
                             score >= 50 ? 'bg-amber-500' :
                             'bg-rose-500'
                           }`}
                           style={{ width: `${score}%` }}
                         />
                       </div>
-                      <span className={`font-bold ${
-                        score >= 80 ? 'text-emerald-700' :
-                        score >= 50 ? 'text-amber-700' :
-                        'text-rose-700'
+                      <span className={`font-extrabold ${
+                        score >= 80 ? 'text-emerald-800' :
+                        score >= 50 ? 'text-amber-800' :
+                        'text-rose-800'
                       }`}>
                         {score}%
                       </span>
@@ -801,10 +819,10 @@ export const JobSearch: React.FC<JobSearchProps> = ({
                     {job.is_new && (
                       <button
                         onClick={() => handleMarkAsSeen(job.external_id)}
-                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-semibold text-emerald-800 bg-emerald-100 hover:bg-emerald-200 border border-emerald-300 transition-colors ml-auto cursor-pointer"
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 border border-emerald-700 transition-colors ml-auto cursor-pointer shadow-xs"
                         title="Marcar como vista para retirar o destaque"
                       >
-                        <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                        <CheckCircle2 className="w-3.5 h-3.5 text-white" />
                         <span>Marcar como vista</span>
                       </button>
                     )}
@@ -812,10 +830,14 @@ export const JobSearch: React.FC<JobSearchProps> = ({
                 </div>
 
                 {/* Ações: Ver Análise & Candidatar-se Oficial */}
-                <div className="flex md:flex-col items-center md:items-end justify-between gap-2.5 shrink-0 pt-3 md:pt-0 border-t md:border-t-0 border-slate-100">
+                <div className="flex md:flex-col items-center md:items-end justify-between gap-2.5 shrink-0 pt-3 md:pt-0 border-t md:border-t-0 border-slate-200">
                   <button
                     onClick={() => setSelectedJobForModal(job)}
-                    className="px-3.5 py-2 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl transition-colors flex items-center gap-1.5 w-full justify-center md:w-auto cursor-pointer"
+                    className={`px-4 py-2.5 text-xs font-bold rounded-xl transition-all flex items-center gap-1.5 w-full justify-center md:w-auto cursor-pointer ${
+                      job.is_new 
+                        ? 'bg-white hover:bg-slate-100 text-slate-900 border-2 border-slate-300 shadow-xs' 
+                        : 'bg-slate-100 hover:bg-slate-200 text-slate-800'
+                    }`}
                   >
                     <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
                     <span>Ver Análise da IA</span>
@@ -825,7 +847,7 @@ export const JobSearch: React.FC<JobSearchProps> = ({
                     href={job.canonical_url || job.url}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-xl shadow-xs hover:shadow transition-all flex items-center gap-1.5 w-full justify-center md:w-auto"
+                    className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl shadow-sm hover:shadow transition-all flex items-center gap-1.5 w-full justify-center md:w-auto cursor-pointer"
                   >
                     <span>Candidatar-se</span>
                     <ArrowUpRight className="w-3.5 h-3.5" />
