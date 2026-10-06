@@ -80,20 +80,22 @@ export default function App() {
   });
 
   const handleAddCustomJob = (newJob: JobOpportunity) => {
-    setJobs(prev => [newJob, ...prev]);
+    const stampedJob = { ...newJob, isNew: true, firstSeenAt: new Date().toISOString() };
+    setJobs(prev => [stampedJob, ...prev]);
     try {
       const savedCustom = JSON.parse(localStorage.getItem('remotehunter_custom_jobs_v1') || '[]');
-      localStorage.setItem('remotehunter_custom_jobs_v1', JSON.stringify([newJob, ...savedCustom]));
+      localStorage.setItem('remotehunter_custom_jobs_v1', JSON.stringify([stampedJob, ...savedCustom]));
     } catch (e) {
       console.error('Error saving custom job:', e);
     }
   };
 
   const handleBatchImportJobs = (importedList: JobOpportunity[]) => {
-    setJobs(prev => [...importedList, ...prev]);
+    const stampedList = importedList.map(j => ({ ...j, isNew: true, firstSeenAt: new Date().toISOString() }));
+    setJobs(prev => [...stampedList, ...prev]);
     try {
       const savedCustom = JSON.parse(localStorage.getItem('remotehunter_custom_jobs_v1') || '[]');
-      localStorage.setItem('remotehunter_custom_jobs_v1', JSON.stringify([...importedList, ...savedCustom]));
+      localStorage.setItem('remotehunter_custom_jobs_v1', JSON.stringify([...stampedList, ...savedCustom]));
     } catch (e) {
       console.error('Error saving imported jobs:', e);
     }

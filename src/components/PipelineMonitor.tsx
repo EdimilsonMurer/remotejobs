@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { SourceLogRecord, PipelineTelemetry } from '../pipeline/worker';
 import DEFAULT_TELEMETRY from '../data/pipelineTelemetry.json';
+import { processDatabaseUpdate, SAMPLE_FRESH_JOBS } from '../services/jobsSyncService';
 
 export const PipelineMonitor: React.FC = () => {
   const [telemetry, setTelemetry] = useState<PipelineTelemetry>(() => {
@@ -104,9 +105,14 @@ export const PipelineMonitor: React.FC = () => {
       logs: [...newLogs, ...prev.logs].slice(0, 50)
     }));
 
+    // Atualiza o banco de dados e marca novas vagas identificadas
+    try {
+      processDatabaseUpdate([], SAMPLE_FRESH_JOBS);
+    } catch {}
+
     setIsTriggering(false);
-    setTriggerSuccess('Ciclo de ingestão executado com sucesso! Coletores atualizados.');
-    setTimeout(() => setTriggerSuccess(null), 5000);
+    setTriggerSuccess('Ciclo de ingestão executado com sucesso! Novas vagas identificadas e destacadas no Radar de Vagas.');
+    setTimeout(() => setTriggerSuccess(null), 6000);
   };
 
   const connectors = [

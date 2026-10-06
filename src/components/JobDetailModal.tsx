@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   X, 
   ExternalLink, 
@@ -7,23 +7,45 @@ import {
   Globe, 
   CheckCircle2, 
   AlertTriangle, 
-  Info,
-  Building2,
-  MapPin,
-  Calendar,
-  Layers,
-  ArrowRight
+  Info, 
+  Building2, 
+  MapPin, 
+  Calendar, 
+  Layers, 
+  ArrowRight,
+  Languages,
+  Loader2
 } from 'lucide-react';
 import { NormalizedJob } from '../connectors/base/types';
 import { JobAnalysis } from '../types/job';
+import { getPortugueseJobDescription, quickTranslateText } from '../services/translationService';
 
 interface JobDetailModalProps {
-  job: (NormalizedJob & { analysis?: JobAnalysis }) | null;
+  job: (NormalizedJob & { analysis?: JobAnalysis; is_new?: boolean; is_seen?: boolean }) | null;
   isOpen: boolean;
   onClose: () => void;
+  onMarkAsSeen?: (jobId: string) => void;
 }
 
-export const JobDetailModal: React.FC<JobDetailModalProps> = ({ job, isOpen, onClose }) => {
+export const JobDetailModal: React.FC<JobDetailModalProps> = ({ job, isOpen, onClose, onMarkAsSeen }) => {
+  const [language, setLanguage] = useState<'pt' | 'en'>('pt');
+  const [translatedDescription, setTranslatedDescription] = useState<string>('');
+  const [isTranslating, setIsTranslating] = useState<boolean>(false);
+
+  useEffect(() => {
+    if (job) {
+      setLanguage('pt');
+      // Tradução rápida determinística imediata
+      const quick = quickTranslateText(job.description);
+      setTranslatedDescription(quick);
+
+      // Busca tradução aprofundada em background
+      getPortugueseJobDescription(job.external_id, job.description, (enhanced) => {
+        setTranslatedDescription(enhanced);
+      });
+    }
+  }, [job]);
+
   if (!isOpen || !job) return null;
 
   const analysis = job.analysis;
@@ -79,7 +101,13 @@ export const JobDetailModal: React.FC<JobDetailModalProps> = ({ job, isOpen, onC
         {/* Modal Header */}
         <div className="p-6 border-b border-slate-100 flex items-start justify-between sticky top-0 bg-white/95 backdrop-blur-sm z-10">
           <div className="pr-6">
-            <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-slate-500 mb-1">
+            <div className="flex items-center flex-wrap gap-2 text-xs font-semibold uppercase tracking-wider text-slate-500 mb-1.5">
+              {job.is_new && (
+                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-500 text-slate-950 shadow-xs animate-pulse">
+                  <Sparkles className="w-3 h-3 fill-slate-950" />
+                  NOVA VAGA RECÉM-ADICIONADA
+                </span>
+              )}
               <span className="text-blue-600 font-bold">{job.platform_slug.toUpperCase()}</span>
               <span>·</span>
               <span>{job.company}</span>
@@ -176,15 +204,62 @@ export const JobDetailModal: React.FC<JobDetailModalProps> = ({ job, isOpen, onC
             </div>
           </div>
 
-          {/* Full Job Description */}
-          <div>
-            <h3 className="text-sm font-bold text-slate-900 uppercase tracking-wide mb-3 flex items-center gap-2">
-              <Layers className="w-4 h-4 text-slate-500" />
-              Descrição Original da Vaga
-            </h3>
-            <div className="bg-slate-50/50 rounded-xl p-5 border border-slate-200/60 max-h-72 overflow-y-auto text-sm text-slate-700 leading-relaxed whitespace-pre-line font-mono text-xs">
-              {job.description}
+          {/* Full Job Description Section in PORTUGUESE with Switcher */}
+          <div className="space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+              <div className="flex items-center gap-2 flex-wrap">
+                <Languages className="w-4 h-4 text-emerald-600" />
+                <h3 className="text-sm font-bold text-slate-900 uppercase tracking-wide">
+                  {language === 'pt' ? 'Descrição da Vaga em Português' : 'Descrição Original da Vaga (Inglês)'}
+                </h3>
+                {language === 'pt' && (
+                  <span className="text-[10px] font-bold text-emerald-700 bg-emerald-100 border border-emerald-300 px-2 py-0.5 rounded-full flex items-center gap-1 shadow-2xs">
+                    <span>🇧🇷 Tradução PT-BR</span>
+                  </span>
+                )}
+              </div>
+
+              {/* Botões de Seleção de Idioma */}
+              <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200 text-xs self-start sm:self-auto">
+                <button
+                  type="button"
+                  onClick={() => setLanguage('pt')}
+                  className={`px-3 py-1 rounded-lg font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                    language === 'pt'
+                      ? 'bg-emerald-600 text-white shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/70'
+                  }`}
+                >
+                  <span>🇧🇷 Português</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setLanguage('en')}
+                  className={`px-3 py-1 rounded-lg font-semibold transition-all flex items-center gap-1.5 cursor-pointer ${
+                    language === 'en'
+                      ? 'bg-slate-800 text-white shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/70'
+                  }`}
+                >
+                  <span>🇺🇸 Original (Inglês)</span>
+                </button>
+              </div>
             </div>
+
+            {/* Container do Texto da Descrição */}
+            <div className="bg-slate-50 rounded-xl p-5 border border-slate-200/90 max-h-80 overflow-y-auto text-sm text-slate-800 leading-relaxed whitespace-pre-line font-sans selection:bg-emerald-200 selection:text-emerald-950">
+              {language === 'pt' ? (
+                translatedDescription || quickTranslateText(job.description)
+              ) : (
+                job.description
+              )}
+            </div>
+
+            <p className="text-[11px] text-slate-500 italic">
+              {language === 'pt' 
+                ? '💡 A descrição foi traduzida automaticamente para o português brasileiro. Você pode alternar para o texto original a qualquer momento no seletor acima.'
+                : 'Exibindo o texto original publicado pela empresa no portal de contratação.'}
+            </p>
           </div>
 
           {/* Transparency & Safety Box */}
@@ -204,10 +279,21 @@ export const JobDetailModal: React.FC<JobDetailModalProps> = ({ job, isOpen, onC
           <div className="text-xs text-slate-500 hidden sm:block">
             Fonte Oficial: <span className="font-medium text-slate-700">{job.source_url || job.url}</span>
           </div>
-          <div className="flex items-center gap-3 w-full sm:w-auto">
+          <div className="flex items-center gap-2.5 w-full sm:w-auto">
+            {job.is_new && onMarkAsSeen && (
+              <button 
+                onClick={() => {
+                  onMarkAsSeen(job.external_id);
+                }}
+                className="px-3.5 py-2.5 text-xs font-semibold text-emerald-800 bg-emerald-100 hover:bg-emerald-200 rounded-lg transition-colors flex items-center justify-center gap-1.5 flex-1 sm:flex-initial cursor-pointer"
+              >
+                <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                <span>Marcar como Vista</span>
+              </button>
+            )}
             <button 
               onClick={onClose}
-              className="px-4 py-2.5 text-xs font-semibold text-slate-600 hover:text-slate-900 hover:bg-slate-200/60 rounded-lg transition-colors flex-1 sm:flex-initial"
+              className="px-4 py-2.5 text-xs font-semibold text-slate-600 hover:text-slate-900 hover:bg-slate-200/60 rounded-lg transition-colors flex-1 sm:flex-initial cursor-pointer"
             >
               Voltar à Lista
             </button>

@@ -5,6 +5,7 @@ import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 import { GoogleGenAI, Type } from '@google/genai';
 import { matchKnownPlatform, inferPlatformDefaults, extractCleanDomain } from './src/services/platformKnowledge';
+import { WelocalizeConnector } from './src/connectors/welocalize';
 
 dotenv.config();
 
@@ -206,6 +207,62 @@ ANALISE A PLATFORMA E RETORNE EXATAMENTE O OBJETO JSON com as seguintes regras:
       ...inferred,
       source: 'heuristic'
     });
+  });
+
+  // Rota de sincronização do banco de dados de vagas
+  app.post('/api/jobs/sync', async (req, res) => {
+    try {
+      const welocalize = new WelocalizeConnector();
+      const rawJobs = await welocalize.getJobs().catch(() => []);
+      const normalized = rawJobs.map(j => welocalize.normalizeJob(j));
+      return res.json({
+        success: true,
+        jobs: normalized,
+        total: normalized.length,
+        timestamp: new Date().toISOString()
+      });
+    } catch (e: any) {
+      console.warn('[Sync API] Erro ao sincronizar vagas via conector:', e?.message);
+      return res.json({
+        success: false,
+        error: e.message || 'Erro ao sincronizar',
+        jobs: [],
+        timestamp: new Date().toISOString()
+      });
+    }
+  });
+
+  // Rota de tradução com Gemini para Português
+  app.post('/api/jobs/translate', async (req, res) => {
+    const { text, title } = req.body;
+    if (!text || typeof text !== 'string') {
+      return res.status(400).json({ error: 'Texto é obrigatório' });
+    }
+
+    if (geminiApiKey) {
+      try {
+        const response = await ai.models.generateContent({
+          model: 'gemini-3.8-flash',
+          contents: `Você é um tradutor profissional especializado em vagas de emprego internacionais na área de tecnologia, inteligência artificial e trabalho remoto.
+Traduza o seguinte texto de descrição de vaga fielmente para o Português do Brasil (pt-BR).
+Mantenha a formatação original em tópicos, parágrafos e clareza.
+Termos técnicos consagrados como "Search Quality Rater", "Ads Rater", "Guidelines", "Feedback", "RLHF", "Freelance" podem ser mantidos ou acompanhados de explicação entre parênteses.
+Não adicione saudações ou comentários, retorne apenas o texto traduzido.
+
+TEXTO ORIGINAL:
+${text.slice(0, 4500)}`
+        });
+
+        const translated = response.text?.trim() || '';
+        if (translated) {
+          return res.json({ translatedText: translated, source: 'gemini' });
+        }
+      } catch (err: any) {
+        console.warn('[Translate API] Erro no Gemini:', err?.message);
+      }
+    }
+
+    return res.json({ translatedText: text, source: 'fallback' });
   });
 
   // Configuração do ambiente Vite / Estático

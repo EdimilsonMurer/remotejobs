@@ -66,6 +66,8 @@ export interface JobRecord {
   deadline?: string | null;
   first_seen_at: string;
   last_seen_at: string;
+  is_new?: boolean;
+  is_seen?: boolean;
   platform?: {
     name: string;
     slug: string;
@@ -156,6 +158,10 @@ export interface JobOpportunity {
   processType: ProcessType;
   isStrongCurrency: boolean;
   isPtBrFriendly: boolean;
+  // Identificação de Vaga Nova vs Base Existente
+  isNew?: boolean;
+  firstSeenAt?: string;
+  isSeen?: boolean;
   // Integração com Análise Gemini
   compatibilityScore?: number;
   englishStatus?: EnglishStatus;
