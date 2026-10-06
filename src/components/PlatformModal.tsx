@@ -483,12 +483,12 @@ export const PlatformModal: React.FC<PlatformModalProps> = ({
                 onChange={(e) => setUserStatus(e.target.value as UserAccountStatus)}
                 className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-emerald-400"
               >
-                <option value="NOT_REGISTERED">Ainda não tenho cadastro</option>
-                <option value="REGISTERED">Cadastro realizado</option>
-                <option value="EXAM_PENDING">Prova de qualificação pendente</option>
-                <option value="UNDER_REVIEW">Perfil em análise</option>
-                <option value="APPROVED_ACTIVE">✅ Aprovado / Ativo em projetos</option>
-                <option value="INACTIVE">Inativo</option>
+                <option value="NOT_REGISTERED">⚪ Ainda não tenho conta</option>
+                <option value="REGISTERED">🟣 Cadastro realizado</option>
+                <option value="EXAM_PENDING">🟡 Prova de qualificação pendente</option>
+                <option value="UNDER_REVIEW">🔵 Perfil em análise</option>
+                <option value="APPROVED_ACTIVE">🟢 Aprovado & Ativo em projetos</option>
+                <option value="INACTIVE">⚫ Inativo / Pausado</option>
               </select>
             </div>
           </div>

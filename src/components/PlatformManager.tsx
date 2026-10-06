@@ -209,6 +209,13 @@ export const PlatformManager: React.FC<PlatformManagerProps> = ({
           </div>
           <div className="w-[1px] h-6 bg-slate-800" />
           <div className="text-center px-2">
+            <span className="text-[10px] text-slate-500 block uppercase font-semibold">Em Análise</span>
+            <span className="text-sm font-bold font-mono text-blue-400 tabular-nums">
+              {accountStats.UNDER_REVIEW}
+            </span>
+          </div>
+          <div className="w-[1px] h-6 bg-slate-800" />
+          <div className="text-center px-2">
             <span className="text-[10px] text-slate-500 block uppercase font-semibold">Cadastrado</span>
             <span className="text-sm font-bold font-mono text-purple-400 tabular-nums">
               {accountStats.REGISTERED}
@@ -320,10 +327,12 @@ export const PlatformManager: React.FC<PlatformManagerProps> = ({
               className="bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-slate-300 focus:outline-none focus:border-emerald-400"
             >
               <option value="ALL">Todos os Status</option>
-              <option value="APPROVED_ACTIVE">🟢 Aprovado / Ativo</option>
-              <option value="EXAM_PENDING">🟡 Prova Pendente</option>
-              <option value="REGISTERED">🟣 Cadastro Feito</option>
-              <option value="NOT_REGISTERED">⚪ A Iniciar</option>
+              <option value="NOT_REGISTERED">⚪ Ainda não tenho conta</option>
+              <option value="REGISTERED">🟣 Cadastro realizado</option>
+              <option value="EXAM_PENDING">🟡 Prova de qualificação pendente</option>
+              <option value="UNDER_REVIEW">🔵 Perfil em análise</option>
+              <option value="APPROVED_ACTIVE">🟢 Aprovado & Ativo em projetos</option>
+              <option value="INACTIVE">⚫ Inativo / Pausado</option>
             </select>
 
             <select
