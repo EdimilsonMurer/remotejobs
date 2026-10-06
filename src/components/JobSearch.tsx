@@ -15,7 +15,6 @@ import {
   Layers,
   ArrowUpRight,
   Clock,
-  Zap,
   Eye,
   Filter
 } from 'lucide-react';
@@ -29,7 +28,6 @@ import {
   processDatabaseUpdate, 
   markJobAsSeen, 
   markAllJobsAsSeen, 
-  SAMPLE_FRESH_JOBS, 
   getStoredSyncState 
 } from '../services/jobsSyncService';
 
@@ -209,30 +207,33 @@ export const JobSearch: React.FC<JobSearchProps> = ({
         console.warn('[Sync] Falha ao consultar endpoint remoto, mesclando base local:', err);
       }
 
-      // Se a API não encontrou novidades ou é offline, insere pacote de novas oportunidades para validação
-      if (incomingJobs.length === 0) {
-        incomingJobs = SAMPLE_FRESH_JOBS;
-      }
-
-      // Processa a atualização identificando o que é estritamente novo
-      const result = processDatabaseUpdate(jobsList, incomingJobs);
-      setJobsList(result.updatedJobs);
-
       const timeStr = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
       setLastSyncFormatted(timeStr);
 
-      if (result.newJobsCount > 0) {
-        setSyncFeedback({
-          type: 'success',
-          message: `${result.newJobsCount} nova(s) vaga(s) identificada(s) e destacada(s) para sua atenção!`,
-          newCount: result.newJobsCount
-        });
-        // Foca automaticamente nas novas para que o usuário veja
-        setViewMode('NEW_ONLY');
+      if (incomingJobs.length > 0) {
+        // Processa a atualização identificando o que é estritamente novo
+        const result = processDatabaseUpdate(jobsList, incomingJobs);
+        setJobsList(result.updatedJobs);
+
+        if (result.newJobsCount > 0) {
+          setSyncFeedback({
+            type: 'success',
+            message: `${result.newJobsCount} nova(s) vaga(s) identificada(s) e destacada(s) para sua atenção!`,
+            newCount: result.newJobsCount
+          });
+          // Foca automaticamente nas novas para que o usuário veja
+          setViewMode('NEW_ONLY');
+        } else {
+          setSyncFeedback({
+            type: 'info',
+            message: 'Banco de dados verificado. Todas as vagas já estavam cadastradas.',
+            newCount: 0
+          });
+        }
       } else {
         setSyncFeedback({
           type: 'info',
-          message: 'Banco de dados verificado. Todas as vagas já estavam cadastradas.',
+          message: 'Banco de dados verificado com sucesso. Nenhuma nova vaga no momento.',
           newCount: 0
         });
       }
@@ -243,25 +244,6 @@ export const JobSearch: React.FC<JobSearchProps> = ({
     } finally {
       setIsSyncingDatabase(false);
     }
-  };
-
-  // Simulação manual de chegada de novas vagas
-  const handleSimulateNewJobs = () => {
-    setIsSyncingDatabase(true);
-    setTimeout(() => {
-      const result = processDatabaseUpdate(jobsList, SAMPLE_FRESH_JOBS);
-      setJobsList(result.updatedJobs);
-      setLastSyncFormatted(new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }));
-
-      setSyncFeedback({
-        type: 'success',
-        message: `${result.newJobsCount} novas vagas adicionadas e carimbadas com selo verde!`,
-        newCount: result.newJobsCount
-      });
-      setViewMode('NEW_ONLY');
-      setIsSyncingDatabase(false);
-      setTimeout(() => setSyncFeedback(null), 8000);
-    }, 600);
   };
 
   // Marca uma vaga como vista
@@ -399,16 +381,6 @@ export const JobSearch: React.FC<JobSearchProps> = ({
             >
               <RefreshCw className={`w-4 h-4 ${isSyncingDatabase ? 'animate-spin' : ''}`} />
               <span>{isSyncingDatabase ? 'Atualizando Banco...' : 'Atualizar Banco de Vagas'}</span>
-            </button>
-
-            {/* Ação rápida para testar chegada de novas vagas */}
-            <button
-              onClick={handleSimulateNewJobs}
-              className="px-3 py-2.5 bg-white/10 hover:bg-white/20 text-white text-xs font-semibold rounded-xl border border-white/20 transition-colors flex items-center gap-1.5 cursor-pointer"
-              title="Simula novas vagas encontradas para testar a separação"
-            >
-              <Zap className="w-3.5 h-3.5 text-amber-300" />
-              <span className="hidden sm:inline">Simular Novas</span>
             </button>
 
             <button 
