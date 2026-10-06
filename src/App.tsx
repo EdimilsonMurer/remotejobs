@@ -100,6 +100,7 @@ export default function App() {
   };
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [editingPlatform, setEditingPlatform] = useState<Platform | null>(null);
+  const [initialModalUrl, setInitialModalUrl] = useState<string>('');
 
   // Sync platforms to localStorage
   useEffect(() => {
@@ -164,11 +165,13 @@ export default function App() {
 
   const handleOpenEdit = (platform: Platform) => {
     setEditingPlatform(platform);
+    setInitialModalUrl('');
     setIsAddModalOpen(true);
   };
 
-  const handleOpenAdd = () => {
+  const handleOpenAdd = (url?: string) => {
     setEditingPlatform(null);
+    setInitialModalUrl(url || '');
     setIsAddModalOpen(true);
   };
 
@@ -259,9 +262,11 @@ export default function App() {
         onClose={() => {
           setIsAddModalOpen(false);
           setEditingPlatform(null);
+          setInitialModalUrl('');
         }}
         onSave={handleSavePlatform}
         editingPlatform={editingPlatform}
+        initialUrl={initialModalUrl}
       />
 
     </div>

@@ -27,7 +27,7 @@ interface PlatformManagerProps {
   platforms: Platform[];
   onUpdatePlatform: (platform: Platform) => void;
   onDeletePlatform: (id: string) => void;
-  onOpenAddModal: () => void;
+  onOpenAddModal: (initialUrl?: string) => void;
   onOpenEditModal: (platform: Platform) => void;
 }
 
@@ -97,6 +97,17 @@ export const PlatformManager: React.FC<PlatformManagerProps> = ({
   const [statusFilter, setStatusFilter] = useState<'ALL' | UserAccountStatus>('ALL');
   const [searchQuery, setSearchQuery] = useState('');
   const [currencyFilter, setCurrencyFilter] = useState<'ALL' | CurrencyType>('ALL');
+  const [quickUrl, setQuickUrl] = useState('');
+
+  const handleQuickSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (quickUrl.trim()) {
+      onOpenAddModal(quickUrl.trim());
+      setQuickUrl('');
+    } else {
+      onOpenAddModal();
+    }
+  };
 
   const filteredPlatforms = platforms.filter(p => {
     if (filterTab === 'FAVORITE' && p.status !== 'FAVORITE') return false;
@@ -198,6 +209,40 @@ export const PlatformManager: React.FC<PlatformManagerProps> = ({
         </div>
       </div>
 
+      {/* Quick Auto-Register by URL Banner */}
+      <form onSubmit={handleQuickSubmit} className="bg-gradient-to-r from-emerald-950/40 via-slate-900 to-slate-900 border border-emerald-500/30 p-3.5 sm:p-4 rounded-xl flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3 shadow-md">
+        <div className="flex items-center gap-3">
+          <div className="w-8 h-8 rounded-lg bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 flex items-center justify-center shrink-0">
+            <Sparkles className="w-4 h-4" />
+          </div>
+          <div>
+            <h3 className="text-xs sm:text-sm font-bold text-white flex items-center gap-1.5">
+              <span>Cadastrar Nova Plataforma com Preenchimento Automático</span>
+            </h3>
+            <p className="text-[11px] text-slate-400">
+              Cole apenas a URL e a IA preencherá automaticamente todos os dados (nome, moeda, inglês e testes).
+            </p>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2 flex-1 md:max-w-md">
+          <input
+            type="url"
+            value={quickUrl}
+            onChange={(e) => setQuickUrl(e.target.value)}
+            placeholder="Cole a URL: ex: https://mindrift.ai..."
+            className="flex-1 bg-slate-950 border border-emerald-500/40 focus:border-emerald-400 rounded-lg px-3 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none font-mono"
+          />
+          <button
+            type="submit"
+            className="px-3.5 py-1.5 bg-emerald-400 hover:bg-emerald-300 text-slate-950 text-xs font-bold rounded-lg flex items-center gap-1.5 transition-all shadow-sm shrink-0 cursor-pointer hover:scale-[1.02] active:scale-[0.98]"
+          >
+            <Sparkles className="w-3.5 h-3.5 fill-slate-950" />
+            <span>Preencher</span>
+          </button>
+        </div>
+      </form>
+
       {/* Filter and Search Bar */}
       <div className="bg-slate-900/90 border border-slate-800 p-4 rounded-xl space-y-3">
         
@@ -279,8 +324,8 @@ export const PlatformManager: React.FC<PlatformManagerProps> = ({
             </select>
 
             <button
-              onClick={onOpenAddModal}
-              className="px-3 py-1.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-xs font-semibold rounded-lg flex items-center gap-1 transition-colors shadow-sm"
+              onClick={() => onOpenAddModal()}
+              className="px-3 py-1.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-xs font-semibold rounded-lg flex items-center gap-1 transition-colors shadow-sm cursor-pointer"
             >
               <Plus className="w-3.5 h-3.5" />
               <span>Nova</span>
