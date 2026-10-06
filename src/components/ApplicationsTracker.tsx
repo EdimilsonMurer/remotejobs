@@ -23,7 +23,9 @@ export const ApplicationsTracker: React.FC<ApplicationsTrackerProps> = ({
   onUpdatePlatform,
   onOpenAddModal
 }) => {
-  const activePlatforms = platforms.filter(p => p.status !== 'BLACKLIST');
+  const activePlatforms = [...platforms.filter(p => p.status !== 'BLACKLIST')].sort((a, b) =>
+    a.name.localeCompare(b.name, 'pt-BR', { sensitivity: 'base' })
+  );
 
   const statusCounts = {
     NOT_REGISTERED: activePlatforms.filter(p => p.userStatus === 'NOT_REGISTERED').length,

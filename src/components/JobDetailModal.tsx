@@ -16,12 +16,14 @@ import {
   Languages,
   Loader2,
   EyeOff,
-  Eye
+  Eye,
+  DollarSign
 } from 'lucide-react';
 import { NormalizedJob } from '../connectors/base/types';
 import { JobAnalysis } from '../types/job';
 import { getPortugueseJobDescription, quickTranslateText } from '../services/translationService';
 import { checkJobForBlockedKeywords } from '../services/blockedKeywordsService';
+import { formatJobSalary, extractJobRequirements } from '../services/jobAnalysisHelper';
 
 interface JobDetailModalProps {
   job: (NormalizedJob & { analysis?: JobAnalysis; is_new?: boolean; is_seen?: boolean; is_hidden?: boolean }) | null;
@@ -63,6 +65,8 @@ export const JobDetailModal: React.FC<JobDetailModalProps> = ({
   if (!isOpen || !job) return null;
 
   const analysis = job.analysis;
+  const salary = formatJobSalary(job);
+  const requirements = extractJobRequirements(job);
 
   const getEnglishBadge = (status?: string) => {
     switch (status) {
@@ -189,7 +193,7 @@ export const JobDetailModal: React.FC<JobDetailModalProps> = ({
 
             {/* AI Reason */}
             {analysis?.reason && (
-              <div className="bg-white rounded-lg p-4 border border-slate-200 shadow-xs mb-4">
+              <div className="bg-white rounded-lg p-4 border border-slate-200 shadow-xs mb-3">
                 <div className="flex items-start gap-2.5">
                   <Sparkles className="w-5 h-5 text-indigo-600 shrink-0 mt-0.5" />
                   <div>
@@ -204,8 +208,37 @@ export const JobDetailModal: React.FC<JobDetailModalProps> = ({
               </div>
             )}
 
-            {/* Key Facts Grid */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+            {/* Requisitos Identificados pela IA (se disponível) */}
+            {requirements.length > 0 && (
+              <div className="bg-white rounded-lg p-4 border border-slate-200 shadow-xs mb-4 space-y-2">
+                <h4 className="text-xs font-bold text-slate-900 uppercase tracking-wide flex items-center gap-1.5">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                  <span>Requisitos Identificados pela IA ({requirements.length}):</span>
+                </h4>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                  {requirements.map((req, idx) => (
+                    <div key={idx} className="flex items-start gap-2 bg-slate-50/80 p-2.5 rounded-lg border border-slate-200/70 text-slate-800">
+                      <span className="text-emerald-600 font-bold text-sm leading-none mt-0.5">✓</span>
+                      <span className="font-medium leading-tight">{req}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Key Facts Grid com Salário */}
+            <div className={`grid gap-3 text-xs ${salary ? 'grid-cols-2 sm:grid-cols-5' : 'grid-cols-2 sm:grid-cols-4'}`}>
+              {salary && (
+                <div className="bg-emerald-50/90 p-3 rounded-lg border border-emerald-300 shadow-2xs col-span-2 sm:col-span-1">
+                  <div className="text-emerald-800 font-bold mb-1 flex items-center gap-1">
+                    <DollarSign className="w-3.5 h-3.5 text-emerald-700" />
+                    <span>Salário</span>
+                  </div>
+                  <div className="font-extrabold text-emerald-950 text-xs sm:text-[13px] leading-tight">
+                    {salary}
+                  </div>
+                </div>
+              )}
               <div className="bg-white p-3 rounded-lg border border-slate-200/70">
                 <div className="text-slate-500 mb-1">Português</div>
                 <div className="font-semibold text-slate-900">
@@ -248,30 +281,43 @@ export const JobDetailModal: React.FC<JobDetailModalProps> = ({
                 )}
               </div>
 
-              {/* Botões de Seleção de Idioma */}
-              <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200 text-xs self-start sm:self-auto">
-                <button
-                  type="button"
-                  onClick={() => setLanguage('pt')}
-                  className={`px-3 py-1 rounded-lg font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
-                    language === 'pt'
-                      ? 'bg-emerald-600 text-white shadow-xs'
-                      : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/70'
-                  }`}
+              {/* Botões de Seleção de Idioma e Link Original */}
+              <div className="flex items-center gap-2 flex-wrap self-start sm:self-auto">
+                <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200 text-xs">
+                  <button
+                    type="button"
+                    onClick={() => setLanguage('pt')}
+                    className={`px-3 py-1 rounded-lg font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                      language === 'pt'
+                        ? 'bg-emerald-600 text-white shadow-xs'
+                        : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/70'
+                    }`}
+                  >
+                    <span>🇧🇷 Português</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setLanguage('en')}
+                    className={`px-3 py-1 rounded-lg font-semibold transition-all flex items-center gap-1.5 cursor-pointer ${
+                      language === 'en'
+                        ? 'bg-slate-800 text-white shadow-xs'
+                        : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/70'
+                    }`}
+                  >
+                    <span>🇺🇸 Original (Inglês)</span>
+                  </button>
+                </div>
+
+                <a
+                  href={job.canonical_url || job.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+                  title="Abrir página oficial da vaga no portal da empresa"
                 >
-                  <span>🇧🇷 Português</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setLanguage('en')}
-                  className={`px-3 py-1 rounded-lg font-semibold transition-all flex items-center gap-1.5 cursor-pointer ${
-                    language === 'en'
-                      ? 'bg-slate-800 text-white shadow-xs'
-                      : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/70'
-                  }`}
-                >
-                  <span>🇺🇸 Original (Inglês)</span>
-                </button>
+                  <span>Link da Vaga</span>
+                  <ExternalLink className="w-3.5 h-3.5" />
+                </a>
               </div>
             </div>
 

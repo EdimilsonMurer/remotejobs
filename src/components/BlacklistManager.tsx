@@ -21,7 +21,9 @@ export const BlacklistManager: React.FC<BlacklistManagerProps> = ({
   const [newReason, setNewReason] = useState('Exige entrevista falada em inglês fluente');
   const [newType, setNewType] = useState<'PLATFORM' | 'COMPANY' | 'KEYWORD'>('PLATFORM');
 
-  const blacklistedPlatforms = platforms.filter(p => p.status === 'BLACKLIST');
+  const blacklistedPlatforms = [...platforms.filter(p => p.status === 'BLACKLIST')].sort((a, b) =>
+    a.name.localeCompare(b.name, 'pt-BR', { sensitivity: 'base' })
+  );
 
   const handleAddCustomRule = (e: React.FormEvent) => {
     e.preventDefault();

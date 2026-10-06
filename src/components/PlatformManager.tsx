@@ -129,6 +129,21 @@ export const PlatformManager: React.FC<PlatformManagerProps> = ({
     return true;
   });
 
+  // Ordenação Alfabética (A-Z), mantendo as plataformas bloqueadas (BLACKLIST) sempre no final
+  const sortedPlatforms = React.useMemo(() => {
+    return [...filteredPlatforms].sort((a, b) => {
+      const aBlocked = a.status === 'BLACKLIST';
+      const bBlocked = b.status === 'BLACKLIST';
+
+      // Bloqueadas vão para o final
+      if (!aBlocked && bBlocked) return -1;
+      if (aBlocked && !bBlocked) return 1;
+
+      // Ordem alfabética de A a Z
+      return a.name.localeCompare(b.name, 'pt-BR', { sensitivity: 'base' });
+    });
+  }, [filteredPlatforms]);
+
   const favoritesCount = platforms.filter(p => p.status === 'FAVORITE').length;
   const blacklistCount = platforms.filter(p => p.status === 'BLACKLIST').length;
   const activePlatforms = platforms.filter(p => p.status !== 'BLACKLIST');
@@ -338,7 +353,7 @@ export const PlatformManager: React.FC<PlatformManagerProps> = ({
 
       {/* Platforms Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {filteredPlatforms.map((platform) => {
+        {sortedPlatforms.map((platform) => {
           const isBlacklisted = platform.status === 'BLACKLIST';
           const isFavorite = platform.status === 'FAVORITE';
 

@@ -19,7 +19,9 @@ import {
   EyeOff,
   Filter,
   RotateCcw,
-  X
+  X,
+  FileText,
+  DollarSign
 } from 'lucide-react';
 import { NormalizedJob } from '../connectors/base/types';
 import { JobOpportunity, Platform, JobAnalysis } from '../types/job';
@@ -41,6 +43,10 @@ import {
   checkJobForBlockedKeywords, 
   getBlockedKeywords 
 } from '../services/blockedKeywordsService';
+import { 
+  formatJobSalary, 
+  extractJobRequirements 
+} from '../services/jobAnalysisHelper';
 
 interface JobSearchProps {
   jobs: JobOpportunity[];
@@ -439,6 +445,39 @@ export const JobSearch: React.FC<JobSearchProps> = ({
     return jobsList.filter(j => (j.analysis?.compatibility_score || 0) >= 80).length;
   }, [jobsList]);
 
+  // Lista de plataformas ordenadas em ordem alfabética (A-Z) com as bloqueadas no final
+  const sortedPlatformOptions = useMemo(() => {
+    const list = platforms && platforms.length > 0 ? platforms : [];
+    const knownSlugs = new Set(list.map(p => p.id.toLowerCase()));
+    const extraSlugs: { id: string; name: string; isBlocked: boolean }[] = [];
+
+    jobsList.forEach(j => {
+      const slug = j.platform_slug.toLowerCase();
+      if (!knownSlugs.has(slug) && !extraSlugs.some(e => e.id === slug)) {
+        extraSlugs.push({
+          id: slug,
+          name: j.platform_slug.charAt(0).toUpperCase() + j.platform_slug.slice(1),
+          isBlocked: false
+        });
+      }
+    });
+
+    const combined = [
+      ...list.map(p => ({
+        id: p.id,
+        name: p.name,
+        isBlocked: p.status === 'BLACKLIST'
+      })),
+      ...extraSlugs
+    ];
+
+    return combined.sort((a, b) => {
+      if (!a.isBlocked && b.isBlocked) return -1;
+      if (a.isBlocked && !b.isBlocked) return 1;
+      return a.name.localeCompare(b.name, 'pt-BR', { sensitivity: 'base' });
+    });
+  }, [platforms, jobsList]);
+
   return (
     <div className="space-y-6">
       {/* Top Banner Informativo com Botão de Atualização do Banco */}
@@ -758,11 +797,11 @@ export const JobSearch: React.FC<JobSearchProps> = ({
               className="bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 font-medium text-slate-700 focus:outline-hidden focus:ring-2 focus:ring-blue-500"
             >
               <option value="ALL">Todas as Plataformas</option>
-              <option value="welocalize">Welocalize / Welo Data</option>
-              <option value="alignerr">Alignerr</option>
-              <option value="mindrift">Mindrift</option>
-              <option value="turing">Turing</option>
-              <option value="outlier">Outlier / Scale AI</option>
+              {sortedPlatformOptions.map(p => (
+                <option key={p.id} value={p.id}>
+                  {p.name} {p.isBlocked ? '🚫 (Bloqueada)' : ''}
+                </option>
+              ))}
             </select>
           </div>
 
@@ -863,6 +902,8 @@ export const JobSearch: React.FC<JobSearchProps> = ({
             const badge = getBadgeStyle(analysis?.english_status);
             const score = analysis?.compatibility_score || 50;
             const blockedCheck = checkJobForBlockedKeywords(job.title, job.description, blockedKeywords);
+            const salary = formatJobSalary(job);
+            const requirements = extractJobRequirements(job);
 
             return (
               <div 
@@ -877,7 +918,7 @@ export const JobSearch: React.FC<JobSearchProps> = ({
               >
                 {/* Informações Principais da Vaga */}
                 <div className="space-y-2.5 flex-1">
-                  {/* Metadados Limpos com Selo de Vaga Nova / Ocultada */}
+                  {/* Metadados Limpos com Selo de Vaga Nova / Ocultada e Salário */}
                   <div className="flex items-center flex-wrap gap-2 text-xs">
                     
                     {/* SELO DE IDENTIFICAÇÃO */}
@@ -915,6 +956,17 @@ export const JobSearch: React.FC<JobSearchProps> = ({
                         </span>
                       </>
                     )}
+
+                    {/* MOSTRAR SALÁRIO QUANDO DISPONÍVEL */}
+                    {salary && (
+                      <>
+                        <span aria-hidden="true" className="text-slate-400">·</span>
+                        <span className="inline-flex items-center gap-1 font-extrabold text-emerald-900 bg-emerald-100/90 px-2.5 py-0.5 rounded-md border border-emerald-300 shadow-2xs">
+                          <DollarSign className="w-3.5 h-3.5 text-emerald-700" />
+                          <span>{salary}</span>
+                        </span>
+                      </>
+                    )}
                   </div>
 
                   {/* Título da Vaga */}
@@ -927,18 +979,48 @@ export const JobSearch: React.FC<JobSearchProps> = ({
                     <span>{job.title}</span>
                   </h3>
 
-                  {/* Diagnóstico da IA curto */}
-                  {analysis?.reason && (
-                    <p className={`text-xs leading-relaxed p-3 rounded-xl border ${
+                  {/* Diagnóstico da IA com Justificativa e Requisitos */}
+                  {(analysis?.reason || requirements.length > 0) && (
+                    <div className={`text-xs leading-relaxed p-3.5 rounded-xl border space-y-2 ${
                       job.is_new 
                         ? 'bg-white border-emerald-300 text-slate-900 font-medium shadow-2xs' 
                         : 'bg-slate-50 border-slate-200 text-slate-700'
                     }`}>
-                      <span className={`font-bold ${job.is_new ? 'text-emerald-900' : 'text-slate-900'}`}>
-                        Diagnóstico IA: 
-                      </span>{' '}
-                      {analysis.reason}
-                    </p>
+                      {analysis?.reason && (
+                        <p>
+                          <span className={`font-bold ${job.is_new ? 'text-emerald-900' : 'text-slate-900'}`}>
+                            Diagnóstico IA: 
+                          </span>{' '}
+                          {analysis.reason}
+                        </p>
+                      )}
+
+                      {/* REQUISITOS IDENTIFICADOS PELA IA (SE DISPONÍVEL) */}
+                      {requirements.length > 0 && (
+                        <div className="pt-2 border-t border-slate-200/70 flex flex-wrap items-center gap-1.5">
+                          <span className="font-bold text-[11px] text-slate-800 flex items-center gap-1 shrink-0">
+                            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                            <span>Requisitos:</span>
+                          </span>
+                          {requirements.slice(0, 3).map((req, idx) => (
+                            <span 
+                              key={idx} 
+                              className="text-[11px] font-medium bg-white border border-slate-200 text-slate-800 px-2 py-0.5 rounded-md shadow-2xs"
+                            >
+                              {req}
+                            </span>
+                          ))}
+                          {requirements.length > 3 && (
+                            <button
+                              onClick={() => setSelectedJobForModal(job)}
+                              className="text-[11px] font-bold text-blue-600 hover:text-blue-800 hover:underline cursor-pointer"
+                            >
+                              +{requirements.length - 3} mais
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </div>
                   )}
 
                   {/* Badges de Idioma e Compatibilidade */}
@@ -997,26 +1079,50 @@ export const JobSearch: React.FC<JobSearchProps> = ({
                   </div>
                 </div>
 
-                {/* Ações: Ver Análise, Ocultar/Restaurar & Candidatar-se Oficial */}
-                <div className="flex md:flex-col items-center md:items-end justify-between gap-2.5 shrink-0 pt-3 md:pt-0 border-t md:border-t-0 border-slate-200">
-                  <div className="flex items-center gap-2 w-full md:w-auto">
+                {/* Ações: Ver Descrição, Análise IA, Ocultar/Restaurar & Candidatar-se Oficial */}
+                <div className="flex flex-col sm:flex-row md:flex-col items-stretch md:items-end justify-between gap-2 shrink-0 pt-3 md:pt-0 border-t md:border-t-0 border-slate-200">
+                  <div className="flex flex-wrap items-center gap-1.5 w-full md:w-auto">
+                    {/* BOTÃO VER DESCRIÇÃO DA VAGA */}
                     <button
                       onClick={() => setSelectedJobForModal(job)}
-                      className={`px-3.5 py-2.5 text-xs font-bold rounded-xl transition-all flex items-center gap-1.5 flex-1 md:flex-initial justify-center cursor-pointer ${
-                        job.is_new 
-                          ? 'bg-white hover:bg-slate-100 text-slate-900 border-2 border-slate-300 shadow-xs' 
-                          : 'bg-slate-100 hover:bg-slate-200 text-slate-800'
-                      }`}
+                      className="px-3 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-1.5 flex-1 md:flex-initial cursor-pointer shadow-2xs"
+                      title="Ver descrição completa da vaga em português"
                     >
-                      <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
-                      <span>Ver Análise da IA</span>
+                      <FileText className="w-3.5 h-3.5 text-indigo-600" />
+                      <span>Ver Descrição</span>
                     </button>
+
+                    {/* BOTÃO VER ANÁLISE IA */}
+                    <button
+                      onClick={() => setSelectedJobForModal(job)}
+                      className={`px-3 py-2 text-xs font-semibold rounded-xl transition-all flex items-center justify-center gap-1.5 flex-1 md:flex-initial cursor-pointer ${
+                        job.is_new 
+                          ? 'bg-white hover:bg-slate-100 text-slate-800 border border-slate-300' 
+                          : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
+                      }`}
+                      title="Ver análise detalhada da inteligência artificial"
+                    >
+                      <Sparkles className="w-3.5 h-3.5 text-indigo-500" />
+                      <span className="hidden sm:inline">Análise IA</span>
+                    </button>
+
+                    {/* LINK DIRETO PARA O ANÚNCIO ORIGINAL DA VAGA */}
+                    <a
+                      href={job.canonical_url || job.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="p-2 text-slate-500 hover:text-blue-600 hover:bg-blue-50 border border-slate-200 rounded-xl transition-colors cursor-pointer"
+                      title="Abrir anúncio oficial da vaga em nova aba"
+                      aria-label="Abrir anúncio oficial da vaga"
+                    >
+                      <ExternalLink className="w-3.5 h-3.5" />
+                    </a>
 
                     {/* BOTÃO OCULTAR / RESTAURAR */}
                     {job.is_hidden ? (
                       <button
                         onClick={() => handleUnhideJob(job.external_id)}
-                        className="px-3 py-2.5 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 text-xs font-semibold rounded-xl transition-all flex items-center gap-1.5 cursor-pointer"
+                        className="px-2.5 py-2 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 text-xs font-semibold rounded-xl transition-all flex items-center gap-1 cursor-pointer"
                         title="Restaurar esta vaga para a lista principal"
                       >
                         <Eye className="w-3.5 h-3.5 text-blue-600" />
@@ -1025,11 +1131,11 @@ export const JobSearch: React.FC<JobSearchProps> = ({
                     ) : (
                       <button
                         onClick={() => handleHideJob(job.external_id)}
-                        className="px-3 py-2.5 bg-slate-100 hover:bg-rose-50 hover:text-rose-700 hover:border-rose-200 border border-slate-200 text-slate-600 text-xs font-medium rounded-xl transition-all flex items-center gap-1.5 cursor-pointer"
+                        className="px-2.5 py-2 bg-slate-100 hover:bg-rose-50 hover:text-rose-700 hover:border-rose-200 border border-slate-200 text-slate-500 text-xs font-medium rounded-xl transition-all flex items-center gap-1 cursor-pointer"
                         title="Ocultar esta vaga da visualização no app (permanece salva no banco para sincronização)"
                       >
-                        <EyeOff className="w-3.5 h-3.5 text-slate-500 hover:text-rose-600" />
-                        <span>Ocultar</span>
+                        <EyeOff className="w-3.5 h-3.5 text-slate-400 hover:text-rose-600" />
+                        <span className="hidden sm:inline">Ocultar</span>
                       </button>
                     )}
                   </div>
@@ -1038,7 +1144,7 @@ export const JobSearch: React.FC<JobSearchProps> = ({
                     href={job.canonical_url || job.url}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl shadow-sm hover:shadow transition-all flex items-center gap-1.5 w-full justify-center md:w-auto cursor-pointer"
+                    className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl shadow-sm hover:shadow transition-all flex items-center justify-center gap-1.5 w-full md:w-auto cursor-pointer"
                   >
                     <span>Candidatar-se</span>
                     <ArrowUpRight className="w-3.5 h-3.5" />
