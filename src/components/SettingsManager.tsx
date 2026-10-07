@@ -20,9 +20,16 @@ import {
   Languages,
   Plus,
   X,
-  Tag
+  Tag,
+  Link as LinkIcon,
+  Server
 } from 'lucide-react';
-import { isSupabaseConfigured } from '../lib/supabase/client';
+import { 
+  getSupabaseConfig, 
+  setCustomSupabaseConfig, 
+  reinitializeSupabaseClient 
+} from '../lib/supabase/client';
+import { syncAllPlatformsToSupabase } from '../lib/supabase/platforms';
 import { getHiddenJobIds, unhideAllJobs } from '../services/jobsSyncService';
 import { 
   getBlockedKeywords, 
@@ -33,6 +40,14 @@ import {
 } from '../services/blockedKeywordsService';
 
 export const SettingsManager: React.FC = () => {
+  // Configurações do Supabase
+  const [supabaseCfg, setSupabaseCfg] = useState(() => getSupabaseConfig());
+  const [inputUrl, setInputUrl] = useState(() => supabaseCfg.url);
+  const [inputKey, setInputKey] = useState(() => supabaseCfg.anonKey);
+  const [isSyncingSupabase, setIsSyncingSupabase] = useState(false);
+  const [supabaseFeedback, setSupabaseFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [copiedSql, setCopiedSql] = useState(false);
+
   // Intervalo de busca em horas (padrão: 6 horas)
   const [intervalHours, setIntervalHours] = useState<number>(() => {
     try {
@@ -195,7 +210,7 @@ jobs:
     { hours: 24, label: 'A cada 24 horas', desc: '1 coleta diária completa' }
   ];
 
-  const supabaseReady = isSupabaseConfigured();
+  const supabaseReady = supabaseCfg.isConfigured;
 
   return (
     <div className="space-y-6">
@@ -525,46 +540,244 @@ jobs:
         </div>
       </div>
 
-      {/* Seção 3: Status das Conexões */}
-      <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-6 space-y-4">
-        <h2 className="text-sm font-bold text-white flex items-center gap-2 border-b border-slate-800 pb-3">
-          <ShieldCheck className="w-4 h-4 text-cyan-400" />
-          Status das Integrações do Sistema
-        </h2>
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
-          <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 flex items-center justify-between">
-            <div className="space-y-1">
-              <div className="font-bold text-slate-200 flex items-center gap-2">
-                <Sparkles className="w-4 h-4 text-indigo-400" />
-                <span>Google Gemini AI</span>
-              </div>
-              <div className="text-slate-500 text-[11px]">Classificador com fallback heurístico</div>
-            </div>
-            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-emerald-950 text-emerald-300 border border-emerald-800">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-              Operacional
-            </span>
+      {/* Seção 4: Configuração & Sincronização com Banco de Dados Supabase */}
+      <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-6 space-y-5">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-3">
+          <div>
+            <h2 className="text-sm font-bold text-white flex items-center gap-2">
+              <Database className="w-4 h-4 text-emerald-400" />
+              <span>Conexão e Gravação com o Supabase PostgreSQL</span>
+            </h2>
+            <p className="text-xs text-slate-400 mt-1">
+              Configure suas credenciais do Supabase para gravar todas as plataformas e vagas na sua própria instância em nuvem.
+            </p>
           </div>
 
-          <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 flex items-center justify-between">
-            <div className="space-y-1">
-              <div className="font-bold text-slate-200 flex items-center gap-2">
-                <Database className="w-4 h-4 text-emerald-400" />
-                <span>Supabase PostgreSQL</span>
-              </div>
-              <div className="text-slate-500 text-[11px]">Persistência em nuvem + Cache local</div>
-            </div>
-            <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-semibold ${
-              supabaseReady 
-                ? 'bg-emerald-950 text-emerald-300 border border-emerald-800'
-                : 'bg-blue-950 text-blue-300 border border-blue-800'
+          <div className="flex items-center gap-2">
+            <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold border ${
+              supabaseCfg.isConfigured 
+                ? 'bg-emerald-950 text-emerald-300 border-emerald-800' 
+                : 'bg-amber-950 text-amber-300 border-amber-800'
             }`}>
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-              {supabaseReady ? 'Conectado na Nuvem' : 'Cache Local Ativo'}
+              <span className={`w-2 h-2 rounded-full ${supabaseCfg.isConfigured ? 'bg-emerald-400' : 'bg-amber-400'}`} />
+              <span>{supabaseCfg.isConfigured ? 'Conectado ao Supabase' : 'Pendente de Configuração'}</span>
             </span>
           </div>
         </div>
+
+        {/* Feedback de Sincronização */}
+        {supabaseFeedback && (
+          <div className={`p-4 rounded-xl border flex items-center justify-between gap-3 text-xs font-semibold animate-in fade-in ${
+            supabaseFeedback.type === 'success' 
+              ? 'bg-emerald-950/90 border-emerald-500 text-emerald-200' 
+              : 'bg-rose-950/90 border-rose-600 text-rose-200'
+          }`}>
+            <div className="flex items-center gap-2">
+              {supabaseFeedback.type === 'success' ? (
+                <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
+              ) : (
+                <AlertCircle className="w-5 h-5 text-rose-400 shrink-0" />
+              )}
+              <span>{supabaseFeedback.message}</span>
+            </div>
+            <button
+              onClick={() => setSupabaseFeedback(null)}
+              className="text-slate-400 hover:text-white p-1 rounded-md"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        )}
+
+        {/* Formulário de Credenciais do Supabase */}
+        <div className="bg-slate-950 p-5 rounded-xl border border-slate-800 space-y-4">
+          <div className="flex items-center justify-between">
+            <h3 className="text-xs font-bold text-slate-200 uppercase tracking-wider flex items-center gap-1.5">
+              <KeyRound className="w-4 h-4 text-cyan-400" />
+              <span>Credenciais da API do Supabase</span>
+            </h3>
+            {supabaseCfg.source === 'local' && (
+              <span className="text-[10px] font-semibold text-cyan-300 bg-cyan-950 border border-cyan-800 px-2 py-0.5 rounded">
+                Configurado via UI Local
+              </span>
+            )}
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+            <div>
+              <label className="block text-slate-300 font-semibold mb-1">
+                URL do Projeto Supabase (Project URL)
+              </label>
+              <input
+                type="url"
+                value={inputUrl}
+                onChange={(e) => setInputUrl(e.target.value)}
+                placeholder="https://seu-projeto.supabase.co"
+                className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-white font-mono placeholder:text-slate-600 focus:outline-hidden focus:border-emerald-400"
+              />
+            </div>
+
+            <div>
+              <label className="block text-slate-300 font-semibold mb-1">
+                Chave Anônima Pública (Anon / Public Key)
+              </label>
+              <input
+                type="password"
+                value={inputKey}
+                onChange={(e) => setInputKey(e.target.value)}
+                placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+                className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-white font-mono placeholder:text-slate-600 focus:outline-hidden focus:border-emerald-400"
+              />
+            </div>
+          </div>
+
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 pt-2">
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setCustomSupabaseConfig(inputUrl, inputKey);
+                  reinitializeSupabaseClient();
+                  const updated = getSupabaseConfig();
+                  setSupabaseCfg(updated);
+                  if (updated.isConfigured) {
+                    setSupabaseFeedback({
+                      type: 'success',
+                      message: 'Credenciais do Supabase salvas e ativadas no sistema com sucesso!'
+                    });
+                  } else {
+                    setSupabaseFeedback({
+                      type: 'error',
+                      message: 'Credenciais inválidas. Verifique a URL e a Chave do Supabase.'
+                    });
+                  }
+                }}
+                className="px-4 py-2 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs rounded-xl shadow-xs transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+              >
+                <Check className="w-4 h-4" />
+                <span>Salvar Credenciais</span>
+              </button>
+
+              {(inputUrl || inputKey) && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCustomSupabaseConfig('', '');
+                    reinitializeSupabaseClient();
+                    const updated = getSupabaseConfig();
+                    setSupabaseCfg(updated);
+                    setInputUrl('');
+                    setInputKey('');
+                    setSupabaseFeedback({
+                      type: 'success',
+                      message: 'Credenciais limpas.'
+                    });
+                  }}
+                  className="px-3 py-2 bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-white border border-slate-700 font-semibold text-xs rounded-xl transition-colors cursor-pointer"
+                >
+                  Limpar
+                </button>
+              )}
+            </div>
+
+            {/* BOTÃO FORÇAR GRAVAÇÃO DE TODAS AS PLATAFORMAS NO SUPABASE */}
+            <button
+              type="button"
+              disabled={isSyncingSupabase}
+              onClick={async () => {
+                setIsSyncingSupabase(true);
+                setSupabaseFeedback(null);
+                try {
+                  const res = await syncAllPlatformsToSupabase();
+                  if (res.success) {
+                    setSupabaseFeedback({
+                      type: 'success',
+                      message: res.message
+                    });
+                  } else {
+                    setSupabaseFeedback({
+                      type: 'error',
+                      message: res.message
+                    });
+                  }
+                } catch (err: any) {
+                  setSupabaseFeedback({
+                    type: 'error',
+                    message: err.message || 'Erro inesperado ao gravar plataformas no Supabase.'
+                  });
+                } finally {
+                  setIsSyncingSupabase(false);
+                }
+              }}
+              className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-bold text-xs rounded-xl shadow-xs transition-colors flex items-center justify-center gap-2 cursor-pointer"
+            >
+              <RefreshCw className={`w-4 h-4 ${isSyncingSupabase ? 'animate-spin' : ''}`} />
+              <span>{isSyncingSupabase ? 'Gravando no Supabase...' : 'Sincronizar Todas as Plataformas no Supabase Agora'}</span>
+            </button>
+          </div>
+        </div>
+
+        {/* AJUDA DE CRIAÇÃO DA TABELA (SQL MIGRATION HELPER) */}
+        <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-3">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
+              <Server className="w-4 h-4 text-amber-400" />
+              <span>Instruções: Não vê as plataformas no seu Supabase?</span>
+            </span>
+            <button
+              type="button"
+              onClick={() => {
+                const sqlScript = `-- SQL para criar a tabela 'platforms' no seu Supabase:
+CREATE TABLE IF NOT EXISTS platforms (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    name VARCHAR(100) NOT NULL UNIQUE,
+    slug VARCHAR(100) NOT NULL UNIQUE,
+    website_url TEXT NOT NULL,
+    jobs_url TEXT NOT NULL,
+    connector_type VARCHAR(50) NOT NULL DEFAULT 'LEVER_API',
+    category VARCHAR(150) DEFAULT 'Treinamento de IA',
+    currency VARCHAR(10) DEFAULT 'USD',
+    english_requirement VARCHAR(50) DEFAULT 'READING_ONLY',
+    process_type VARCHAR(50) DEFAULT 'ONLINE_EXAM',
+    user_status VARCHAR(50) DEFAULT 'NOT_REGISTERED',
+    notes TEXT DEFAULT '',
+    average_pay_rate VARCHAR(100),
+    payment_methods TEXT[] DEFAULT '{}',
+    enabled BOOLEAN DEFAULT true,
+    status VARCHAR(50) DEFAULT 'HEALTHY',
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Habilita RLS e permite permissão pública de escrita para a aplicação
+ALTER TABLE platforms ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Permitir sincronização de plataformas" ON platforms FOR ALL USING (true) WITH CHECK (true);`;
+                navigator.clipboard.writeText(sqlScript);
+                setCopiedSql(true);
+                setTimeout(() => setCopiedSql(false), 3000);
+              }}
+              className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-xs font-semibold text-cyan-300 border border-slate-700 rounded-lg flex items-center gap-1.5 transition-colors cursor-pointer"
+            >
+              {copiedSql ? (
+                <>
+                  <Check className="w-3.5 h-3.5 text-emerald-400" />
+                  <span className="text-emerald-400 font-bold">SQL Copiado!</span>
+                </>
+              ) : (
+                <>
+                  <Copy className="w-3.5 h-3.5" />
+                  <span>Copiar SQL de Criação da Tabela</span>
+                </>
+              )}
+            </button>
+          </div>
+          <p className="text-[11px] text-slate-400 leading-relaxed">
+            1. No seu painel do Supabase, acesse <strong>SQL Editor</strong> &gt; <strong>New Query</strong>.<br />
+            2. Cole o código SQL copiado com o botão acima e clique em <strong>Run</strong>.<br />
+            3. Volte aqui e clique em <strong>"Sincronizar Todas as Plataformas no Supabase Agora"</strong> para popular seu banco de dados na nuvem!
+          </p>
+        </div>
+
       </div>
     </div>
   );

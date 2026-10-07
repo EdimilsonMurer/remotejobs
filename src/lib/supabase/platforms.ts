@@ -136,6 +136,63 @@ export async function savePlatformToSupabase(platform: Platform): Promise<{ succ
 }
 
 /**
+ * Sincroniza em lote TODAS as plataformas do app diretamente para o Supabase
+ */
+export async function syncAllPlatformsToSupabase(platformsToSync?: Platform[]): Promise<{
+  success: boolean;
+  totalSynced: number;
+  totalAttempted: number;
+  message: string;
+}> {
+  if (!isSupabaseConfigured()) {
+    return {
+      success: false,
+      totalSynced: 0,
+      totalAttempted: 0,
+      message: 'Supabase não está configurado. Por favor, insira a URL e a Chave Anônima do Supabase nas Configurações.'
+    };
+  }
+
+  let list: Platform[] = platformsToSync || [];
+  if (!list || list.length === 0) {
+    try {
+      const saved = localStorage.getItem('remotehunter_platforms_v1');
+      list = saved ? JSON.parse(saved) : INITIAL_PLATFORMS;
+    } catch {
+      list = INITIAL_PLATFORMS;
+    }
+  }
+
+  let syncedCount = 0;
+  let lastError = '';
+
+  for (const plat of list) {
+    const res = await savePlatformToSupabase(plat);
+    if (res.success && res.fromSupabase) {
+      syncedCount++;
+    } else if (res.message) {
+      lastError = res.message;
+    }
+  }
+
+  if (syncedCount > 0) {
+    return {
+      success: true,
+      totalSynced: syncedCount,
+      totalAttempted: list.length,
+      message: `${syncedCount} de ${list.length} plataforma(s) gravadas e sincronizadas com sucesso na tabela "platforms" do Supabase!`
+    };
+  }
+
+  return {
+    success: false,
+    totalSynced: 0,
+    totalAttempted: list.length,
+    message: lastError ? `Erro ao gravar no Supabase: ${lastError}` : 'Não foi possível enviar as plataformas para o Supabase.'
+  };
+}
+
+/**
  * Carrega a lista de plataformas do Supabase ou utiliza os valores locais
  */
 export async function loadPlatformsFromSupabase(): Promise<Platform[]> {
