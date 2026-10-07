@@ -41,7 +41,7 @@ export function normalizeKeyword(term: string): string {
 }
 
 /**
- * Retorna as palavras proibidas salvas ou os padrões
+ * Retorna as palavras proibidas salvas no localStorage ou os padrões
  */
 export function getBlockedKeywords(): string[] {
   try {
@@ -59,7 +59,57 @@ export function getBlockedKeywords(): string[] {
 }
 
 /**
- * Salva a lista de palavras proibidas
+ * Carrega a lista oficial de palavras proibidas diretamente do Supabase PostgreSQL
+ */
+export async function loadBlockedKeywordsFromSupabase(): Promise<string[]> {
+  const localList = getBlockedKeywords();
+
+  if (!isSupabaseConfigured()) {
+    return localList;
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from('blocked_keywords')
+      .select('term')
+      .order('term', { ascending: true });
+
+    if (error) {
+      console.warn('[BlockedKeywords] Erro ao consultar Supabase:', error.message);
+      return localList;
+    }
+
+    if (data && data.length > 0) {
+      const termsFromDb = Array.from(
+        new Set(data.map((row: any) => row.term.trim()).filter(Boolean))
+      );
+
+      // Salva no localStorage para manter atualizado em qualquer aba/janela
+      localStorage.setItem(STORAGE_KEY_BLOCKED_KEYWORDS, JSON.stringify(termsFromDb));
+      window.dispatchEvent(new CustomEvent('blocked-keywords-updated', { detail: termsFromDb }));
+      return termsFromDb;
+    }
+
+    // Se o banco está conectado mas vazio, faz semeadura inicial
+    if (data && data.length === 0) {
+      console.log('🌱 [BlockedKeywords] Semeando termos padrão no Supabase...');
+      await Promise.all(DEFAULT_BLOCKED_KEYWORDS.map(term =>
+        (supabase.from('blocked_keywords') as any).upsert(
+          { term, category: 'IDIOMA_ESTRANGEIRO' },
+          { onConflict: 'term' }
+        )
+      ));
+    }
+
+    return localList;
+  } catch (err: any) {
+    console.warn('[BlockedKeywords] Falha de conexão com Supabase:', err?.message);
+    return localList;
+  }
+}
+
+/**
+ * Salva a lista de palavras proibidas localmente e no Supabase
  */
 export function saveBlockedKeywords(keywords: string[]): void {
   try {
@@ -71,8 +121,13 @@ export function saveBlockedKeywords(keywords: string[]): void {
     // Sincroniza com Supabase se disponível
     if (isSupabaseConfigured()) {
       Promise.all(unique.map(term => 
-        (supabase.from('blocked_keywords') as any).upsert({ term, category: 'IDIOMA_ESTRANGEIRO' }, { onConflict: 'term' })
-      )).catch(() => {});
+        (supabase.from('blocked_keywords') as any).upsert(
+          { term, category: 'IDIOMA_ESTRANGEIRO' },
+          { onConflict: 'term' }
+        )
+      )).catch(err => {
+        console.warn('[BlockedKeywords] Erro ao sincronizar com Supabase:', err);
+      });
     }
   } catch (e) {
     console.error('[BlockedKeywords] Erro ao salvar:', e);
@@ -80,7 +135,7 @@ export function saveBlockedKeywords(keywords: string[]): void {
 }
 
 /**
- * Adiciona uma nova palavra proibida
+ * Adiciona uma nova palavra proibida (grava no localStorage e no Supabase)
  */
 export function addBlockedKeyword(keyword: string): string[] {
   const clean = keyword.trim().toLowerCase();
@@ -92,19 +147,44 @@ export function addBlockedKeyword(keyword: string): string[] {
   if (!current.some(k => normalizeKeyword(k) === normalizedNew)) {
     const updated = [...current, clean];
     saveBlockedKeywords(updated);
+    
+    // Gravação direta no Supabase
+    if (isSupabaseConfigured()) {
+      (supabase.from('blocked_keywords') as any).upsert(
+        { term: clean, category: 'IDIOMA_ESTRANGEIRO' },
+        { onConflict: 'term' }
+      ).catch((err: any) => console.warn('[Supabase] Erro ao gravar palavra:', err));
+    }
+    
     return updated;
   }
   return current;
 }
 
 /**
- * Remove uma palavra proibida
+ * Remove uma palavra proibida (remove do localStorage e deleta da tabela do Supabase)
  */
 export function removeBlockedKeyword(keyword: string): string[] {
   const normalizedTarget = normalizeKeyword(keyword);
   const current = getBlockedKeywords();
   const updated = current.filter(k => normalizeKeyword(k) !== normalizedTarget);
   saveBlockedKeywords(updated);
+
+  // Deleta diretamente da tabela no Supabase
+  if (isSupabaseConfigured()) {
+    (supabase.from('blocked_keywords') as any)
+      .delete()
+      .eq('term', keyword.trim().toLowerCase())
+      .then(() => {
+        // Também tenta remover a versão exata caso haja diferenças de acentuação
+        (supabase.from('blocked_keywords') as any)
+          .delete()
+          .ilike('term', keyword.trim())
+          .catch(() => {});
+      })
+      .catch((err: any) => console.warn('[Supabase] Erro ao deletar palavra:', err));
+  }
+
   return updated;
 }
 
@@ -121,6 +201,12 @@ export function resetDefaultBlockedKeywords(): string[] {
  */
 export function clearAllBlockedKeywords(): string[] {
   saveBlockedKeywords([]);
+  if (isSupabaseConfigured()) {
+    (supabase.from('blocked_keywords') as any)
+      .delete()
+      .neq('term', '__dummy_impossible_key__')
+      .catch((err: any) => console.warn('[Supabase] Erro ao limpar palavras:', err));
+  }
   return [];
 }
 
@@ -148,7 +234,6 @@ export function checkJobForBlockedKeywords(
     if (!normKey) continue;
 
     // Busca como palavra completa ou expressão exata (evita falsos positivos em substrings curtas)
-    // Se a palavra tiver mais de 2 letras, verifica limites de palavra
     const escaped = normKey.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const regex = new RegExp(`(^|[^a-z0-9])${escaped}([^a-z0-9]|$)`, 'i');
 
@@ -161,4 +246,12 @@ export function checkJobForBlockedKeywords(
     isBlocked: matchedTerms.length > 0,
     matchedTerms
   };
+}
+
+// Inicializa escuta automática de hidratação do Supabase/Vercel
+if (typeof window !== 'undefined') {
+  loadBlockedKeywordsFromSupabase().catch(() => {});
+  window.addEventListener('supabase-configured-from-vercel', () => {
+    loadBlockedKeywordsFromSupabase().catch(() => {});
+  });
 }

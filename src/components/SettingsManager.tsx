@@ -34,6 +34,7 @@ import { syncAllJobsToSupabase, checkSupabaseHealth } from '../lib/supabase/jobs
 import { getHiddenJobIds, unhideAllJobs } from '../services/jobsSyncService';
 import { 
   getBlockedKeywords, 
+  loadBlockedKeywordsFromSupabase,
   addBlockedKeyword, 
   removeBlockedKeyword, 
   resetDefaultBlockedKeywords, 
@@ -99,6 +100,24 @@ export const SettingsManager: React.FC = () => {
   const [blockedWords, setBlockedWords] = useState<string[]>(() => {
     return getBlockedKeywords();
   });
+
+  useEffect(() => {
+    // Carrega do Supabase ao montar o componente
+    loadBlockedKeywordsFromSupabase().then(dbWords => {
+      if (dbWords && dbWords.length > 0) {
+        setBlockedWords(dbWords);
+      }
+    }).catch(() => {});
+
+    const handler = (e: any) => {
+      if (e.detail && Array.isArray(e.detail)) {
+        setBlockedWords(e.detail);
+      }
+    };
+    window.addEventListener('blocked-keywords-updated', handler);
+    return () => window.removeEventListener('blocked-keywords-updated', handler);
+  }, []);
+
   const [newWordInput, setNewWordInput] = useState<string>('');
 
   const handleAddWord = () => {

@@ -44,7 +44,8 @@ import {
 } from '../services/jobsSyncService';
 import { 
   checkJobForBlockedKeywords, 
-  getBlockedKeywords 
+  getBlockedKeywords,
+  loadBlockedKeywordsFromSupabase 
 } from '../services/blockedKeywordsService';
 import { 
   formatJobSalary, 
@@ -216,6 +217,12 @@ export const JobSearch: React.FC<JobSearchProps> = ({
   const [blockedKeywords, setBlockedKeywords] = useState<string[]>(() => getBlockedKeywords());
 
   useEffect(() => {
+    loadBlockedKeywordsFromSupabase().then(dbWords => {
+      if (dbWords && dbWords.length > 0) {
+        setBlockedKeywords(dbWords);
+      }
+    }).catch(() => {});
+
     const handler = (e: any) => {
       if (e.detail && Array.isArray(e.detail)) {
         setBlockedKeywords(e.detail);
