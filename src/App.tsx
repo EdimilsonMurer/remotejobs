@@ -12,6 +12,7 @@ import { Platform, BlacklistRule, JobOpportunity } from './types/job';
 import { INITIAL_PLATFORMS, INITIAL_BLACKLIST_RULES } from './data/initialPlatforms';
 import { CURATED_JOBS } from './data/curatedJobs';
 import { loadPlatformsFromSupabase, savePlatformToSupabase } from './lib/supabase/platforms';
+import { saveJobToSupabase } from './lib/supabase/jobs';
 
 const STORAGE_KEY_PLATFORMS = 'remotehunter_platforms_v1';
 const STORAGE_KEY_RULES = 'remotehunter_blacklist_rules_v1';
@@ -94,6 +95,44 @@ export default function App() {
     } catch (e) {
       console.error('Error saving custom job:', e);
     }
+
+    // Persiste no Supabase PostgreSQL
+    saveJobToSupabase({
+      external_id: newJob.id,
+      platform_slug: newJob.platformId || 'outros',
+      title: newJob.title,
+      company: newJob.company,
+      url: newJob.url,
+      canonical_url: newJob.url,
+      source_url: newJob.url,
+      description: newJob.description || '',
+      country: 'Brasil',
+      location: 'Remoto',
+      remote: true,
+      employment_type: 'Freelance',
+      salary_min: null,
+      salary_max: null,
+      salary_currency: newJob.currency || 'USD',
+      published_at: new Date().toISOString(),
+      analysis: {
+        english_status: newJob.requiresEnglishInterview ? 'REQUIRED' : 'NONE',
+        portuguese_required: true,
+        portuguese_level: 'NATIVE',
+        brazil_eligible: true,
+        remote_eligible: true,
+        job_category: 'AI',
+        experience_level: 'ENTRY',
+        salary_detected: true,
+        salary_min: null,
+        salary_max: null,
+        salary_currency: newJob.currency || 'USD',
+        compatibility_score: newJob.requiresEnglishInterview ? 40 : 95,
+        confidence: 90,
+        reason: 'Vaga cadastrada pelo usuário.',
+        analysis_version: 'v1',
+        analyzed_at: new Date().toISOString()
+      }
+    }).catch(err => console.warn('[Supabase] Erro ao salvar vaga:', err));
   };
 
   const handleBatchImportJobs = (importedList: JobOpportunity[]) => {
@@ -104,6 +143,28 @@ export default function App() {
       localStorage.setItem('remotehunter_custom_jobs_v1', JSON.stringify([...stampedList, ...savedCustom]));
     } catch (e) {
       console.error('Error saving imported jobs:', e);
+    }
+
+    // Persiste no Supabase PostgreSQL
+    for (const j of importedList) {
+      saveJobToSupabase({
+        external_id: j.id,
+        platform_slug: j.platformId || 'outros',
+        title: j.title,
+        company: j.company,
+        url: j.url,
+        canonical_url: j.url,
+        source_url: j.url,
+        description: j.description || '',
+        country: 'Brasil',
+        location: 'Remoto',
+        remote: true,
+        employment_type: 'Freelance',
+        salary_min: null,
+        salary_max: null,
+        salary_currency: j.currency || 'USD',
+        published_at: new Date().toISOString()
+      }).catch(() => {});
     }
   };
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);

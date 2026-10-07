@@ -58,6 +58,7 @@ export default async function handler(req: any, res: any) {
                     .from('jobs')
                     .upsert({
                       platform_id: pData.id,
+                      platform_slug: connector.slug,
                       external_id: job.external_id,
                       title: job.title,
                       company: job.company,
@@ -66,12 +67,16 @@ export default async function handler(req: any, res: any) {
                       source_url: job.source_url,
                       description: job.description,
                       description_hash: generateDescriptionHash(job.description),
-                      location: job.location,
-                      remote: job.remote,
-                      employment_type: job.employment_type,
+                      country: job.country || 'Brasil',
+                      location: job.location || 'Remoto',
+                      remote: job.remote ?? true,
+                      employment_type: job.employment_type || 'Freelance',
+                      salary_min: job.salary_min || null,
+                      salary_max: job.salary_max || null,
+                      salary_currency: job.salary_currency || 'USD',
                       status: 'ACTIVE',
                       last_seen_at: new Date().toISOString()
-                    }, { onConflict: 'platform_id,external_id' })
+                    }, { onConflict: 'platform_slug,external_id' })
                     .select('id')
                     .single();
 
@@ -98,14 +103,27 @@ export default async function handler(req: any, res: any) {
           }
         }
 
-        results.push({
+        const logEntry = {
           platform: connector.name,
           slug: connector.slug,
           jobs_found: jobs.length,
           analyzed: connectorAnalyzed,
           duration_ms: Date.now() - cStart,
           status: 'SUCCESS'
-        });
+        };
+        results.push(logEntry);
+
+        if (supabaseClient) {
+          try {
+            await supabaseClient.from('source_logs').insert({
+              platform_slug: connector.slug,
+              status: 'SUCCESS',
+              jobs_found: jobs.length,
+              jobs_new: connectorAnalyzed,
+              finished_at: new Date().toISOString()
+            });
+          } catch {}
+        }
       } catch (err: any) {
         results.push({
           platform: connector.name,
@@ -113,6 +131,17 @@ export default async function handler(req: any, res: any) {
           error: err.message,
           status: 'FAILED'
         });
+
+        if (supabaseClient) {
+          try {
+            await supabaseClient.from('source_logs').insert({
+              platform_slug: connector.slug,
+              status: 'FAILED',
+              error_message: err.message,
+              finished_at: new Date().toISOString()
+            });
+          } catch {}
+        }
       }
     }
 

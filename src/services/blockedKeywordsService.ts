@@ -1,3 +1,5 @@
+import { supabase, isSupabaseConfigured } from '../lib/supabase/client';
+
 export const DEFAULT_BLOCKED_KEYWORDS: string[] = [
   'italiano',
   'italian',
@@ -65,6 +67,13 @@ export function saveBlockedKeywords(keywords: string[]): void {
     localStorage.setItem(STORAGE_KEY_BLOCKED_KEYWORDS, JSON.stringify(unique));
     // Dispara evento customizado para sincronização de abas e componentes
     window.dispatchEvent(new CustomEvent('blocked-keywords-updated', { detail: unique }));
+
+    // Sincroniza com Supabase se disponível
+    if (isSupabaseConfigured()) {
+      Promise.all(unique.map(term => 
+        (supabase.from('blocked_keywords') as any).upsert({ term, category: 'IDIOMA_ESTRANGEIRO' }, { onConflict: 'term' })
+      )).catch(() => {});
+    }
   } catch (e) {
     console.error('[BlockedKeywords] Erro ao salvar:', e);
   }

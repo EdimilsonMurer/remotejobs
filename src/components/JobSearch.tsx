@@ -51,6 +51,12 @@ import {
   extractJobRequirements,
   getJobSalaryNumericValue 
 } from '../services/jobAnalysisHelper';
+import { 
+  loadJobsFromSupabase, 
+  saveJobToSupabase, 
+  syncAllJobsToSupabase 
+} from '../lib/supabase/jobs';
+import { isSupabaseConfigured } from '../lib/supabase/client';
 
 export type JobSortMode = 'DEFAULT' | 'PLATFORM_ASC' | 'SALARY_DESC' | 'COMPATIBILITY_DESC' | 'NEWEST';
 
@@ -150,6 +156,25 @@ export const JobSearch: React.FC<JobSearchProps> = ({
     return applyNewJobFlags(initialBaseJobs);
   });
 
+  const [isSupabaseLive, setIsSupabaseLive] = useState(false);
+
+  // Carrega vagas persistidas diretamente do Supabase PostgreSQL
+  useEffect(() => {
+    loadJobsFromSupabase().then(({ jobs: dbJobs, fromSupabase, totalCount }) => {
+      if (fromSupabase && totalCount > 0) {
+        setIsSupabaseLive(true);
+        setJobsList(applyNewJobFlags(dbJobs));
+      } else if (fromSupabase && totalCount === 0) {
+        // Supabase conectado com 0 vagas: faz semeadura inicial automática
+        setIsSupabaseLive(true);
+        console.log('🌱 [Supabase] Semeando vagas iniciais no banco de dados...');
+        syncAllJobsToSupabase(initialBaseJobs).catch(() => {});
+      }
+    }).catch(err => {
+      console.warn('[Supabase Jobs] Usando cache local:', err);
+    });
+  }, [initialBaseJobs]);
+
   // Atualização de sincronização
   const [isSyncingDatabase, setIsSyncingDatabase] = useState(false);
   const [syncFeedback, setSyncFeedback] = useState<{
@@ -222,7 +247,18 @@ export const JobSearch: React.FC<JobSearchProps> = ({
     try {
       let incomingJobs: UnifiedJobWithStatus[] = [];
 
-      // 1. Tenta buscar novidades reais do endpoint de sincronização
+      // 1. Tenta carregar dados mais recentes do Supabase PostgreSQL
+      try {
+        const { jobs: supabaseJobs, fromSupabase, totalCount } = await loadJobsFromSupabase();
+        if (fromSupabase && totalCount > 0) {
+          setIsSupabaseLive(true);
+          incomingJobs = [...supabaseJobs];
+        }
+      } catch (e: any) {
+        console.warn('[Sync] Falha ao consultar Supabase:', e?.message);
+      }
+
+      // 2. Tenta buscar novidades em tempo real dos coletores oficiais
       try {
         const response = await fetch('/api/jobs/sync', {
           method: 'POST',
@@ -232,7 +268,7 @@ export const JobSearch: React.FC<JobSearchProps> = ({
         if (response.ok) {
           const data = await response.json();
           if (Array.isArray(data.jobs) && data.jobs.length > 0) {
-            incomingJobs = data.jobs.map((item: any) => ({
+            const freshlyCollected = data.jobs.map((item: any) => ({
               ...item,
               analysis: item.analysis || {
                 english_status: 'READING_ONLY',
@@ -253,10 +289,19 @@ export const JobSearch: React.FC<JobSearchProps> = ({
                 analyzed_at: new Date().toISOString()
               }
             }));
+
+            // Persiste no Supabase caso configurado
+            if (isSupabaseConfigured()) {
+              for (const j of freshlyCollected) {
+                saveJobToSupabase(j).catch(() => {});
+              }
+            }
+
+            incomingJobs = [...freshlyCollected, ...incomingJobs];
           }
         }
       } catch (err) {
-        console.warn('[Sync] Falha ao consultar endpoint remoto, mesclando base local:', err);
+        console.warn('[Sync] Falha ao consultar endpoint remoto, mesclando base:', err);
       }
 
       const nowIso = new Date().toISOString();
@@ -270,7 +315,7 @@ export const JobSearch: React.FC<JobSearchProps> = ({
         if (result.newJobsCount > 0) {
           setSyncFeedback({
             type: 'success',
-            message: `${result.newJobsCount} nova(s) vaga(s) identificada(s) e destacada(s) para sua atenção!`,
+            message: `${result.newJobsCount} nova(s) vaga(s) sincronizadas e registradas no banco de dados!`,
             newCount: result.newJobsCount
           });
           // Foca automaticamente nas novas para que o usuário veja
@@ -278,7 +323,9 @@ export const JobSearch: React.FC<JobSearchProps> = ({
         } else {
           setSyncFeedback({
             type: 'info',
-            message: 'Banco de dados verificado. Todas as vagas já estavam cadastradas.',
+            message: isSupabaseConfigured() 
+              ? 'Banco de dados Supabase verificado. Todas as vagas estão sincronizadas e atualizadas!' 
+              : 'Base de dados verificada com sucesso.',
             newCount: 0
           });
         }
@@ -592,9 +639,16 @@ export const JobSearch: React.FC<JobSearchProps> = ({
                 <span>{isSyncingDatabase ? 'Atualizando Banco...' : 'Atualizar Banco de Vagas'}</span>
               </button>
 
-              <div className="text-[11px] text-cyan-200/90 flex items-center gap-1 font-medium bg-white/10 px-2.5 py-0.5 rounded-full border border-white/10">
-                <Clock className="w-3 h-3 text-cyan-300 shrink-0" />
-                <span>Última atualização: <strong className="text-white">{lastSyncFormatted}</strong></span>
+              <div className="flex items-center gap-2 flex-wrap">
+                <div className="text-[11px] text-cyan-200/90 flex items-center gap-1.5 font-medium bg-white/10 px-2.5 py-0.5 rounded-full border border-white/10">
+                  <span className={`w-2 h-2 rounded-full ${isSupabaseLive ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`} />
+                  <span>{isSupabaseLive ? 'Supabase PostgreSQL Conectado' : 'Cache Local'}</span>
+                </div>
+
+                <div className="text-[11px] text-cyan-200/90 flex items-center gap-1 font-medium bg-white/10 px-2.5 py-0.5 rounded-full border border-white/10">
+                  <Clock className="w-3 h-3 text-cyan-300 shrink-0" />
+                  <span>Última atualização: <strong className="text-white">{lastSyncFormatted}</strong></span>
+                </div>
               </div>
             </div>
 

@@ -3,15 +3,17 @@ import { Database } from '../../types/database.types';
 
 export function getSupabaseServerClient(): SupabaseClient<Database> {
   const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '';
-  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY || 
+              process.env.SUPABASE_ANON_KEY || 
+              process.env.VITE_SUPABASE_ANON_KEY || '';
 
-  if (!supabaseUrl || !serviceRoleKey) {
+  if (!supabaseUrl || !key) {
     throw new Error(
-      'Configuração ausente: SUPABASE_URL e SUPABASE_SERVICE_ROLE_KEY são obrigatórios para operações de backend/pipeline.'
+      'Configuração ausente: URL e chave do Supabase são obrigatórios para operações de backend/pipeline.'
     );
   }
 
-  return createClient<Database>(supabaseUrl, serviceRoleKey, {
+  return createClient<Database>(supabaseUrl, key, {
     auth: {
       persistSession: false,
       autoRefreshToken: false,
