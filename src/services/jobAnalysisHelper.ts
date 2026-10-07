@@ -90,6 +90,87 @@ export function formatJobSalary(job: UnifiedJobWithStatus | any): string | null 
 }
 
 /**
+ * Converte o salário da vaga em um valor numérico normalizado por hora (em USD aproximado)
+ * para permitir ordenação precisa de maior para menor salário.
+ */
+export function getJobSalaryNumericValue(job: UnifiedJobWithStatus | any): number {
+  if (!job) return 0;
+
+  const analysis = job.analysis;
+
+  // 1. Prioriza dados estruturados se existirem
+  const max = job.salary_max ?? analysis?.salary_max;
+  const min = job.salary_min ?? analysis?.salary_min;
+  const currency = (job.salary_currency || analysis?.salary_currency || 'USD').toUpperCase();
+
+  const getCurrencyMultiplier = (curr: string) => {
+    if (curr === 'BRL' || curr === 'R$') return 0.18; // ~R$ 5.50 / USD
+    if (curr === 'EUR' || curr === '€') return 1.08;
+    if (curr === 'GBP' || curr === '£') return 1.25;
+    return 1.0; // USD ou padrão
+  };
+
+  const mult = getCurrencyMultiplier(currency);
+
+  if (max != null && max > 0) {
+    const isMonthly = (max > 500 && (currency === 'BRL' || currency === 'R$')) || max > 1000;
+    const hourlyEquivalent = isMonthly ? max / 160 : max;
+    return hourlyEquivalent * mult;
+  }
+  if (min != null && min > 0) {
+    const isMonthly = (min > 500 && (currency === 'BRL' || currency === 'R$')) || min > 1000;
+    const hourlyEquivalent = isMonthly ? min / 160 : min;
+    return hourlyEquivalent * mult;
+  }
+
+  // 2. Extração via texto formatado ou descrição
+  const fullText = `${job.salary || ''} ${job.title || ''} ${job.description || ''}`;
+
+  // Casos específicos de plataformas
+  const platform = (job.platform_slug || job.company || '').toLowerCase();
+  
+  // Welo data / Lever pattern: "Pay Rate: Based on tasks (approximately $7 per hour)"
+  const weloPayMatch = fullText.match(/(?:pay\s*rate|hourly\s*rate|rate)[\s:]+[^.\n\r]*?(?:approximately|approx\.?|about|\~)?\s*(\$|€|£|R\$)\s*(\d+(?:\.\d+)?)\s*(?:per\s*hour|\/hour|\/hora|\/hr|\/h)/i);
+  if (weloPayMatch) {
+    const sym = weloPayMatch[1];
+    const val = parseFloat(weloPayMatch[2]);
+    const m = sym === '€' ? 1.08 : sym === '£' ? 1.25 : sym === 'R$' ? 0.18 : 1.0;
+    return val * m;
+  }
+
+  // Faixa de valores: "$15.00 - $25.00 / hr", "US$ 10 - 20 / hora"
+  const rangeMatch = fullText.match(/(?:US\$|\$|R\$|EUR|€|£)\s*(\d+(?:[.,]\d+)?)\s*(?:-|a|até|to)\s*(?:US\$|\$|R\$|EUR|€|£)?\s*(\d+(?:[.,]\d+)?)\s*(?:per\s*hour|\/hr|\/hora|\/h|\/month|\/mês|\/mo|por\s*hora|por\s*mês)?/i);
+  if (rangeMatch) {
+    const sym = fullText.includes('R$') ? 'R$' : fullText.includes('€') ? '€' : fullText.includes('£') ? '£' : 'US$';
+    const v2 = parseFloat(rangeMatch[2].replace(',', '.'));
+    const isMonthly = /mês|month|mensal/i.test(rangeMatch[0]) || (v2 > 500 && sym === 'R$');
+    const hourlyEquivalent = isMonthly ? v2 / 160 : v2;
+    const m = getCurrencyMultiplier(sym);
+    return hourlyEquivalent * m;
+  }
+
+  // Valor único: "$14.50 / hour", "€10 / hr"
+  const singleMatch = fullText.match(/(?:US\$|\$|R\$|EUR|€|£)\s*(\d+(?:[.,]\d+)?)\s*(?:per\s*hour|\/hr|\/hora|\/h|\/month|\/mês|\/mo|por\s*hora|por\s*mês)/i);
+  if (singleMatch) {
+    const sym = fullText.includes('R$') ? 'R$' : fullText.includes('€') ? '€' : fullText.includes('£') ? '£' : 'US$';
+    const val = parseFloat(singleMatch[1].replace(',', '.'));
+    const isMonthly = /mês|month|mensal/i.test(singleMatch[0]) || (val > 500 && sym === 'R$');
+    const hourlyEquivalent = isMonthly ? val / 160 : val;
+    const m = getCurrencyMultiplier(sym);
+    return hourlyEquivalent * m;
+  }
+
+  // Médias de plataformas consolidadas quando não há valor explícito
+  if (platform.includes('outlier') || platform.includes('alignerr')) return 25.0;
+  if (platform.includes('clickworker')) return 12.0 * 1.08;
+  if (platform.includes('oneforma')) return 18.0;
+  if (platform.includes('welocalize') && fullText.toLowerCase().includes('rater')) return 8.5;
+  if (platform.includes('turing')) return 20.0;
+
+  return 0;
+}
+
+/**
  * Extrai requisitos estruturados da vaga para exibição no Diagnóstico da IA
  */
 export function extractJobRequirements(job: UnifiedJobWithStatus | any): string[] {

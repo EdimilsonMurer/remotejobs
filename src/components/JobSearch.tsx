@@ -21,7 +21,10 @@ import {
   RotateCcw,
   X,
   FileText,
-  DollarSign
+  DollarSign,
+  ArrowUpDown,
+  ArrowDownAZ,
+  TrendingDown
 } from 'lucide-react';
 import { NormalizedJob } from '../connectors/base/types';
 import { JobOpportunity, Platform, JobAnalysis } from '../types/job';
@@ -45,8 +48,11 @@ import {
 } from '../services/blockedKeywordsService';
 import { 
   formatJobSalary, 
-  extractJobRequirements 
+  extractJobRequirements,
+  getJobSalaryNumericValue 
 } from '../services/jobAnalysisHelper';
+
+export type JobSortMode = 'DEFAULT' | 'PLATFORM_ASC' | 'SALARY_DESC' | 'COMPATIBILITY_DESC' | 'NEWEST';
 
 interface JobSearchProps {
   jobs: JobOpportunity[];
@@ -164,6 +170,11 @@ export const JobSearch: React.FC<JobSearchProps> = ({
   const [selectedEnglishStatus, setSelectedEnglishStatus] = useState<string>('ALL');
   const [minScore, setMinScore] = useState<number>(0);
   const [selectedJobForModal, setSelectedJobForModal] = useState<UnifiedJobWithStatus | null>(null);
+
+  // Modos de ordenação das vagas:
+  // 1- por ordem alfabética da plataforma
+  // 2- por ordem de maior para menor salário
+  const [sortMode, setSortMode] = useState<JobSortMode>('DEFAULT');
 
   // Palavras Proibidas / Termos de Outros Idiomas
   const [blockedKeywords, setBlockedKeywords] = useState<string[]>(() => getBlockedKeywords());
@@ -404,6 +415,81 @@ export const JobSearch: React.FC<JobSearchProps> = ({
       return true;
     });
   }, [jobsList, viewMode, onlyPortuguese, blockedKeywords, selectedEnglishStatus, selectedPlatform, minScore, searchQuery]);
+
+  // Mapeamento rápido de ID para Nome amigável de cada plataforma
+  const platformNameMap = useMemo(() => {
+    const map = new Map<string, string>();
+    (platforms || []).forEach(p => {
+      map.set(p.id.toLowerCase(), p.name);
+    });
+    return map;
+  }, [platforms]);
+
+  // Retorna o nome de exibição formatado da plataforma para a vaga
+  const getPlatformDisplayName = (job: UnifiedJobWithStatus): string => {
+    const slug = (job.platform_slug || '').toLowerCase();
+    if (platformNameMap.has(slug)) {
+      return platformNameMap.get(slug)!;
+    }
+    if (job.company && job.company.trim().length > 0) {
+      return job.company.trim();
+    }
+    if (slug) {
+      return slug.charAt(0).toUpperCase() + slug.slice(1);
+    }
+    return 'Outra Plataforma';
+  };
+
+  // Aplica as ordenações solicitadas:
+  // 1- por ordem alfabética da plataforma (A-Z)
+  // 2- por ordem de maior para menor salário ($$$ -> $)
+  // + ordenação por compatibilidade, mais recentes ou padrão
+  const sortedAndFilteredJobs = useMemo(() => {
+    const list = [...filteredJobs];
+
+    switch (sortMode) {
+      case 'PLATFORM_ASC':
+        return list.sort((a, b) => {
+          const platA = getPlatformDisplayName(a);
+          const platB = getPlatformDisplayName(b);
+          const cmp = platA.localeCompare(platB, 'pt-BR', { sensitivity: 'base' });
+          if (cmp !== 0) return cmp;
+          return (a.title || '').localeCompare(b.title || '', 'pt-BR', { sensitivity: 'base' });
+        });
+
+      case 'SALARY_DESC':
+        return list.sort((a, b) => {
+          const salA = getJobSalaryNumericValue(a);
+          const salB = getJobSalaryNumericValue(b);
+          if (salB !== salA) {
+            return salB - salA; // maior salário numérico primeiro
+          }
+          // Desempate por compatibilidade
+          return (b.analysis?.compatibility_score || 0) - (a.analysis?.compatibility_score || 0);
+        });
+
+      case 'COMPATIBILITY_DESC':
+        return list.sort((a, b) => {
+          return (b.analysis?.compatibility_score || 0) - (a.analysis?.compatibility_score || 0);
+        });
+
+      case 'NEWEST':
+        return list.sort((a, b) => {
+          const dateA = a.published_at ? new Date(a.published_at).getTime() : 0;
+          const dateB = b.published_at ? new Date(b.published_at).getTime() : 0;
+          return dateB - dateA;
+        });
+
+      case 'DEFAULT':
+      default:
+        // Ordem padrão: vagas novas no topo, seguido de maior compatibilidade
+        return list.sort((a, b) => {
+          if (a.is_new && !b.is_new) return -1;
+          if (!a.is_new && b.is_new) return 1;
+          return (b.analysis?.compatibility_score || 0) - (a.analysis?.compatibility_score || 0);
+        });
+    }
+  }, [filteredJobs, sortMode, platformNameMap]);
 
   // Helpers de estilo para selos de inglês
   const getBadgeStyle = (status?: string) => {
@@ -837,7 +923,7 @@ export const JobSearch: React.FC<JobSearchProps> = ({
 
           <div className="ml-auto text-slate-500 font-medium flex items-center gap-2">
             <span>
-              Exibindo <span className="font-bold text-slate-900">{filteredJobs.length}</span> de {viewMode === 'HIDDEN_ONLY' ? hiddenJobsCount : activeJobsCount} vagas
+              Exibindo <span className="font-bold text-slate-900">{sortedAndFilteredJobs.length}</span> de {viewMode === 'HIDDEN_ONLY' ? hiddenJobsCount : activeJobsCount} vagas
             </span>
             {viewMode === 'NEW_ONLY' && (
               <span className="text-[11px] font-bold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full">
@@ -851,10 +937,85 @@ export const JobSearch: React.FC<JobSearchProps> = ({
             )}
           </div>
         </div>
+
+        {/* Linha 3: Ordenação de Vagas (Ordem Alfabética da Plataforma & Maior para Menor Salário) */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-3 border-t border-slate-100 text-xs">
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="flex items-center gap-1.5 font-semibold text-slate-700">
+              <ArrowUpDown className="w-4 h-4 text-blue-600" />
+              <span>Ordenar por:</span>
+            </div>
+
+            {/* Dropdown com as Formas de Ordenação */}
+            <select
+              value={sortMode}
+              onChange={e => setSortMode(e.target.value as JobSortMode)}
+              className="bg-slate-50 hover:bg-slate-100 border border-slate-300 rounded-lg px-3 py-1.5 font-bold text-slate-800 focus:outline-hidden focus:ring-2 focus:ring-blue-500 cursor-pointer transition-colors"
+            >
+              <option value="DEFAULT">✨ Recomendadas / Relevância</option>
+              <option value="PLATFORM_ASC">🏢 1. Ordem Alfabética da Plataforma (A-Z)</option>
+              <option value="SALARY_DESC">💰 2. Maior para Menor Salário ($$$ → $)</option>
+              <option value="COMPATIBILITY_DESC">⭐ Maior Compatibilidade IA</option>
+              <option value="NEWEST">🕒 Mais Recentes</option>
+            </select>
+
+            {/* Atalhos Rápidos com 1 Clique para as 2 Principais Opções Solicitadas */}
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => setSortMode(prev => prev === 'PLATFORM_ASC' ? 'DEFAULT' : 'PLATFORM_ASC')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer border ${
+                  sortMode === 'PLATFORM_ASC'
+                    ? 'bg-blue-600 text-white border-blue-700 shadow-xs'
+                    : 'bg-white text-slate-700 border-slate-200 hover:bg-blue-50 hover:text-blue-700 hover:border-blue-200'
+                }`}
+                title="1- Ordenar por ordem alfabética da plataforma (A-Z)"
+              >
+                <ArrowDownAZ className="w-3.5 h-3.5" />
+                <span>Plataforma (A-Z)</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setSortMode(prev => prev === 'SALARY_DESC' ? 'DEFAULT' : 'SALARY_DESC')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer border ${
+                  sortMode === 'SALARY_DESC'
+                    ? 'bg-emerald-600 text-white border-emerald-700 shadow-xs'
+                    : 'bg-white text-slate-700 border-slate-200 hover:bg-emerald-50 hover:text-emerald-800 hover:border-emerald-200'
+                }`}
+                title="2- Ordenar por ordem de maior para menor salário"
+              >
+                <DollarSign className="w-3.5 h-3.5" />
+                <span>Maior Salário</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Indicador e Reset da Ordenação Atual */}
+          {sortMode !== 'DEFAULT' && (
+            <div className="flex items-center gap-1.5 text-[11px] font-medium text-slate-500 self-end sm:self-center">
+              <span>Ordenado:</span>
+              <span className="font-bold text-slate-900 bg-slate-100 border border-slate-200 px-2 py-0.5 rounded-md">
+                {sortMode === 'PLATFORM_ASC' && '🏢 Ordem Alfabética da Plataforma'}
+                {sortMode === 'SALARY_DESC' && '💰 Maior para Menor Salário'}
+                {sortMode === 'COMPATIBILITY_DESC' && '⭐ Maior Compatibilidade'}
+                {sortMode === 'NEWEST' && '🕒 Mais Recentes'}
+              </span>
+              <button
+                type="button"
+                onClick={() => setSortMode('DEFAULT')}
+                className="text-blue-600 hover:text-blue-800 font-bold ml-1 hover:underline cursor-pointer"
+                title="Restaurar ordenação padrão"
+              >
+                Restaurar
+              </button>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Lista de Vagas */}
-      {filteredJobs.length === 0 ? (
+      {sortedAndFilteredJobs.length === 0 ? (
         <div className="bg-white rounded-2xl p-12 text-center border border-slate-200 space-y-3">
           <Info className="w-10 h-10 text-slate-400 mx-auto" />
           <h3 className="text-base font-bold text-slate-800">
@@ -888,6 +1049,7 @@ export const JobSearch: React.FC<JobSearchProps> = ({
                 setSelectedEnglishStatus('ALL');
                 setMinScore(0);
                 setSearchQuery('');
+                setSortMode('DEFAULT');
               }}
               className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-lg transition-colors cursor-pointer"
             >
@@ -897,7 +1059,7 @@ export const JobSearch: React.FC<JobSearchProps> = ({
         </div>
       ) : (
         <div className="grid grid-cols-1 gap-4">
-          {filteredJobs.map(job => {
+          {sortedAndFilteredJobs.map(job => {
             const analysis = job.analysis;
             const badge = getBadgeStyle(analysis?.english_status);
             const score = analysis?.compatibility_score || 50;
