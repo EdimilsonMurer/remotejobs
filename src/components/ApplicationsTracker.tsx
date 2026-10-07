@@ -11,6 +11,7 @@ import {
   DollarSign
 } from 'lucide-react';
 import { Platform, UserAccountStatus } from '../types/job';
+import { saveJobApplicationToSupabase } from '../lib/supabase/applications';
 
 interface ApplicationsTrackerProps {
   platforms: Platform[];
@@ -40,6 +41,18 @@ export const ApplicationsTracker: React.FC<ApplicationsTrackerProps> = ({
       ...platform,
       userStatus: newStatus,
       updatedAt: new Date().toISOString().split('T')[0]
+    });
+
+    // Grava também na tabela dedicada job_applications do Supabase
+    saveJobApplicationToSupabase({
+      platform_slug: platform.id.toLowerCase(),
+      platform_name: platform.name,
+      status: newStatus,
+      notes: platform.notes || '',
+      applied_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    }).catch(err => {
+      console.warn('[Supabase Applications] Aviso ao salvar candidatura:', err);
     });
   };
 

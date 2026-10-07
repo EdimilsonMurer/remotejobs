@@ -7,6 +7,7 @@ import { GoogleGenAI, Type } from '@google/genai';
 import { matchKnownPlatform, inferPlatformDefaults, extractCleanDomain } from './src/services/platformKnowledge';
 import { WelocalizeConnector } from './src/connectors/welocalize';
 import { TuringConnector } from './src/connectors/turing';
+import seedAllHandler from './api/supabase/seed-all.ts';
 
 dotenv.config();
 
@@ -280,6 +281,11 @@ ANALISE A PLATFORMA E RETORNE EXATAMENTE O OBJETO JSON com as seguintes regras:
         timestamp: new Date().toISOString()
       });
     }
+  });
+
+  // Rota de semeadura e sincronização em massa no Supabase
+  app.all('/api/supabase/seed-all', async (req, res) => {
+    return seedAllHandler(req, res);
   });
 
   // Rota de tradução com Gemini para Português

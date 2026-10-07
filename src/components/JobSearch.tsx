@@ -173,7 +173,15 @@ export const JobSearch: React.FC<JobSearchProps> = ({
           // Supabase conectado com 0 vagas: faz semeadura inicial automática
           setIsSupabaseLive(true);
           console.log('🌱 [Supabase] Semeando vagas iniciais no banco de dados...');
-          syncAllJobsToSupabase(initialBaseJobs).catch(() => {});
+          syncAllJobsToSupabase(initialBaseJobs).then((syncRes) => {
+            if (syncRes.success) {
+              loadJobsFromSupabase().then(({ jobs: seededJobs }) => {
+                if (seededJobs && seededJobs.length > 0) {
+                  setJobsList(applyNewJobFlags(seededJobs));
+                }
+              }).catch(() => {});
+            }
+          }).catch(() => {});
         }
       }).catch(err => {
         console.warn('[Supabase Jobs] Usando cache local:', err);

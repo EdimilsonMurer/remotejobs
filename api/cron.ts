@@ -51,50 +51,71 @@ export default async function handler(req: any, res: any) {
                   .from('platforms')
                   .select('id')
                   .eq('slug', connector.slug)
-                  .single();
+                  .limit(1)
+                  .maybeSingle();
 
-                if (pData) {
-                  const { data: insertedJob } = await supabaseClient
+                const platformId = pData ? pData.id : null;
+                const jobPayload: Record<string, any> = {
+                  platform_slug: connector.slug,
+                  external_id: job.external_id,
+                  title: job.title,
+                  company: job.company,
+                  url: job.url,
+                  canonical_url: job.canonical_url || job.url,
+                  source_url: job.source_url || job.url,
+                  description: job.description || '',
+                  description_hash: generateDescriptionHash(job.description || job.title),
+                  country: job.country || 'Brasil',
+                  location: job.location || 'Remoto',
+                  remote: job.remote ?? true,
+                  employment_type: job.employment_type || 'Freelance',
+                  salary_min: job.salary_min || null,
+                  salary_max: job.salary_max || null,
+                  salary_currency: job.salary_currency || 'USD',
+                  status: 'ACTIVE',
+                  last_seen_at: new Date().toISOString()
+                };
+
+                if (platformId) {
+                  jobPayload.platform_id = platformId;
+                }
+
+                let insertedJob: any = null;
+                const { data: ins1, error: err1 } = await supabaseClient
+                  .from('jobs')
+                  .upsert(jobPayload, { onConflict: 'platform_slug,external_id' })
+                  .select('id')
+                  .maybeSingle();
+
+                if (!err1 && ins1) {
+                  insertedJob = ins1;
+                } else if (platformId) {
+                  const { data: ins2 } = await supabaseClient
                     .from('jobs')
-                    .upsert({
-                      platform_id: pData.id,
-                      platform_slug: connector.slug,
-                      external_id: job.external_id,
-                      title: job.title,
-                      company: job.company,
-                      url: job.url,
-                      canonical_url: job.canonical_url,
-                      source_url: job.source_url,
-                      description: job.description,
-                      description_hash: generateDescriptionHash(job.description),
-                      country: job.country || 'Brasil',
-                      location: job.location || 'Remoto',
-                      remote: job.remote ?? true,
-                      employment_type: job.employment_type || 'Freelance',
-                      salary_min: job.salary_min || null,
-                      salary_max: job.salary_max || null,
-                      salary_currency: job.salary_currency || 'USD',
-                      status: 'ACTIVE',
-                      last_seen_at: new Date().toISOString()
-                    }, { onConflict: 'platform_slug,external_id' })
+                    .upsert(jobPayload, { onConflict: 'platform_id,external_id' })
                     .select('id')
-                    .single();
+                    .maybeSingle();
+                  insertedJob = ins2;
+                }
 
-                  if (insertedJob) {
-                    await supabaseClient.from('job_analysis').upsert({
-                      job_id: insertedJob.id,
-                      english_status: analysis.english_status,
-                      portuguese_required: analysis.portuguese_required,
-                      portuguese_level: analysis.portuguese_level,
-                      brazil_eligible: analysis.brazil_eligible,
-                      remote_eligible: analysis.remote_eligible,
-                      job_category: analysis.job_category,
-                      experience_level: analysis.experience_level,
-                      compatibility_score: analysis.compatibility_score,
-                      confidence: analysis.confidence,
-                      reason: analysis.reason
-                    }, { onConflict: 'job_id' });
-                  }
+                if (insertedJob && insertedJob.id) {
+                  let engStatus = (analysis.english_status as string) || 'NONE';
+                  if (engStatus === 'READING_ONLY') engStatus = 'PARTIAL';
+
+                  await supabaseClient.from('job_analysis').upsert({
+                    job_id: insertedJob.id,
+                    external_id: job.external_id,
+                    english_status: engStatus,
+                    portuguese_required: analysis.portuguese_required,
+                    portuguese_level: analysis.portuguese_level,
+                    brazil_eligible: analysis.brazil_eligible,
+                    remote_eligible: analysis.remote_eligible,
+                    job_category: analysis.job_category,
+                    experience_level: analysis.experience_level,
+                    compatibility_score: analysis.compatibility_score,
+                    confidence: analysis.confidence,
+                    reason: analysis.reason
+                  }, { onConflict: 'job_id' });
                 }
               }
             } catch (err: any) {
@@ -115,13 +136,27 @@ export default async function handler(req: any, res: any) {
 
         if (supabaseClient) {
           try {
-            await supabaseClient.from('source_logs').insert({
+            const { data: pLog } = await supabaseClient
+              .from('platforms')
+              .select('id')
+              .eq('slug', connector.slug)
+              .limit(1)
+              .maybeSingle();
+
+            const logPayload: Record<string, any> = {
               platform_slug: connector.slug,
               status: 'SUCCESS',
               jobs_found: jobs.length,
               jobs_new: connectorAnalyzed,
               finished_at: new Date().toISOString()
-            });
+            };
+            if (pLog?.id) logPayload.platform_id = pLog.id;
+
+            const { error: logErr } = await supabaseClient.from('source_logs').insert(logPayload);
+            if (logErr && logPayload.platform_id) {
+              delete logPayload.platform_slug;
+              await supabaseClient.from('source_logs').insert(logPayload);
+            }
           } catch {}
         }
       } catch (err: any) {
@@ -134,12 +169,26 @@ export default async function handler(req: any, res: any) {
 
         if (supabaseClient) {
           try {
-            await supabaseClient.from('source_logs').insert({
+            const { data: pLog } = await supabaseClient
+              .from('platforms')
+              .select('id')
+              .eq('slug', connector.slug)
+              .limit(1)
+              .maybeSingle();
+
+            const logPayload: Record<string, any> = {
               platform_slug: connector.slug,
               status: 'FAILED',
               error_message: err.message,
               finished_at: new Date().toISOString()
-            });
+            };
+            if (pLog?.id) logPayload.platform_id = pLog.id;
+
+            const { error: logErr } = await supabaseClient.from('source_logs').insert(logPayload);
+            if (logErr && logPayload.platform_id) {
+              delete logPayload.platform_slug;
+              await supabaseClient.from('source_logs').insert(logPayload);
+            }
           } catch {}
         }
       }

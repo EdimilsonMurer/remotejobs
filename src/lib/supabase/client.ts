@@ -5,8 +5,9 @@ import { Database } from '../../types/database.types';
 let serverRuntimeConfig: { url: string; anonKey: string; isConfigured: boolean } | null = null;
 
 export const getSupabaseConfig = () => {
-  const envUrl = import.meta.env.VITE_SUPABASE_URL || '';
-  const envKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
+  const metaEnv = typeof import.meta !== 'undefined' && (import.meta as any).env ? (import.meta as any).env : {};
+  const envUrl = metaEnv.VITE_SUPABASE_URL || '';
+  const envKey = metaEnv.VITE_SUPABASE_ANON_KEY || '';
 
   let localUrl = '';
   let localKey = '';

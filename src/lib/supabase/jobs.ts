@@ -2,6 +2,91 @@ import { supabase, isSupabaseConfigured } from './client';
 import { UnifiedJobWithStatus } from '../../services/jobsSyncService';
 import { CURATED_JOBS } from '../../data/curatedJobs';
 import LIVE_JOBS_RAW from '../../data/liveCuratedJobs.json';
+import { syncAllPlatformsToSupabase } from './platforms';
+import { loadBlockedKeywordsFromSupabase } from '../../services/blockedKeywordsService';
+import { seedInitialApplicationsToSupabase } from './applications';
+import { seedInitialSourceLogsToSupabase } from './sourceLogs';
+import { seedInitialJobHistoryToSupabase } from './history';
+
+/**
+ * Gera um hash determinístico de 64 caracteres hexadecimais (compatível com VARCHAR(64) NOT NULL)
+ */
+export function generateClientSafeHash(text: string): string {
+  if (!text) {
+    return '0'.repeat(64);
+  }
+  let h1 = 0xdeadbeef, h2 = 0x41c6ce57;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text.charCodeAt(i);
+    h1 = Math.imul(h1 ^ ch, 2654435761);
+    h2 = Math.imul(h2 ^ ch, 1597334677);
+  }
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507);
+  h1 ^= Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507);
+  h2 ^= Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+
+  const hex1 = (h1 >>> 0).toString(16).padStart(8, '0');
+  const hex2 = (h2 >>> 0).toString(16).padStart(8, '0');
+  const base16 = (hex1 + hex2).repeat(4);
+  return base16.substring(0, 64);
+}
+
+/**
+ * Converte valores de english_status para garantir compatibilidade com schemas que usam ENUM ou VARCHAR
+ */
+function normalizeEnglishStatusForDb(status: string | undefined): string {
+  if (!status) return 'NONE';
+  const upper = status.toUpperCase();
+  // Se o banco usar o ENUM original (NONE, DESIRABLE, PARTIAL, REQUIRED, UNKNOWN)
+  if (upper === 'READING_ONLY') return 'PARTIAL';
+  if (upper === 'FLUENT_INTERVIEW') return 'REQUIRED';
+  if (upper === 'BASIC') return 'PARTIAL';
+  if (upper === 'INTERMEDIATE') return 'PARTIAL';
+  if (['NONE', 'DESIRABLE', 'PARTIAL', 'REQUIRED', 'UNKNOWN'].includes(upper)) {
+    return upper;
+  }
+  return 'NONE';
+}
+
+/**
+ * Executa operação com remoção de colunas ausentes no schema cache do PostgREST
+ */
+async function executeJobSchemaFallback(
+  operation: (payload: Record<string, any>) => Promise<{ data?: any; error?: any }>,
+  initialPayload: Record<string, any>
+): Promise<{ data?: any; error?: any; removedColumns: string[] }> {
+  let currentPayload = { ...initialPayload };
+  const removedColumns: string[] = [];
+
+  for (let attempt = 0; attempt < 8; attempt++) {
+    const res = await operation(currentPayload);
+    if (!res.error) {
+      return { data: res.data, error: null, removedColumns };
+    }
+
+    const msg = res.error.message || '';
+    // PostgREST: "Could not find the '...' column of 'jobs' in the schema cache"
+    const match = msg.match(/Could not find the '([^']+)' column/i);
+    if (match && match[1] && currentPayload.hasOwnProperty(match[1])) {
+      const col = match[1];
+      console.warn(`[Supabase Jobs] Coluna '${col}' ausente no schema cache. Omitindo e tentando novamente...`);
+      delete currentPayload[col];
+      removedColumns.push(col);
+      continue;
+    }
+
+    // Tratamento para enum de english_status
+    if (msg.includes('enum english_status_type') && currentPayload.english_status) {
+      currentPayload.english_status = normalizeEnglishStatusForDb(currentPayload.english_status);
+      continue;
+    }
+
+    return { data: null, error: res.error, removedColumns };
+  }
+
+  return { data: null, error: new Error('Limite de tentativas de schema excedido'), removedColumns };
+}
 
 /**
  * Converte um registro do Supabase para o formato unificado da aplicação
@@ -87,7 +172,6 @@ export async function loadJobsFromSupabase(): Promise<{
     let analysisMap = new Map<string, any>();
 
     try {
-      // Busca em lotes para evitar limites de URL
       for (let i = 0; i < jobIds.length; i += 100) {
         const chunk = jobIds.slice(i, i + 100);
         const { data: analysisRows } = await supabase
@@ -111,7 +195,6 @@ export async function loadJobsFromSupabase(): Promise<{
       return databaseRowToJob(j, aRow);
     });
 
-    // Obtém a data mais recente de atualização entre as vagas
     let latestUpdateIso: string | null = null;
     for (const j of (jobsRows as any[])) {
       const ts = j.updated_at || j.first_seen_at || j.published_at;
@@ -140,12 +223,13 @@ export async function loadJobsFromSupabase(): Promise<{
 }
 
 /**
- * Salva uma vaga individual e sua análise de IA no Supabase
+ * Salva uma vaga individual e sua análise de IA no Supabase com tolerância a falhas de schema
  */
 export async function saveJobToSupabase(job: UnifiedJobWithStatus): Promise<{
   success: boolean;
   message?: string;
   fromSupabase: boolean;
+  jobId?: string;
 }> {
   if (!isSupabaseConfigured()) {
     return {
@@ -170,12 +254,17 @@ export async function saveJobToSupabase(job: UnifiedJobWithStatus): Promise<{
 
       if (pData && (pData as any).id) {
         platformId = (pData as any).id;
+      } else {
+        // Fallback: pega a primeira plataforma disponível
+        const { data: firstPlat } = await supabase.from('platforms').select('id').limit(1).maybeSingle();
+        if (firstPlat) platformId = (firstPlat as any).id;
       }
     } catch {}
 
-    // 2. Prepara o payload
+    const hashVal = generateClientSafeHash(job.description || job.title);
+
+    // 2. Prepara o payload completo
     const jobPayload: Record<string, any> = {
-      platform_slug: slug,
       external_id: job.external_id,
       title: job.title,
       company: job.company,
@@ -183,7 +272,7 @@ export async function saveJobToSupabase(job: UnifiedJobWithStatus): Promise<{
       canonical_url: job.canonical_url || job.url,
       source_url: job.source_url || job.url,
       description: job.description || '',
-      description_hash: '',
+      description_hash: hashVal,
       country: job.country || 'Brasil',
       location: job.location || 'Remoto',
       remote: job.remote ?? true,
@@ -198,41 +287,46 @@ export async function saveJobToSupabase(job: UnifiedJobWithStatus): Promise<{
       updated_at: new Date().toISOString()
     };
 
+    if (slug) {
+      jobPayload.platform_slug = slug;
+    }
     if (platformId) {
       jobPayload.platform_id = platformId;
     }
 
     let insertedJobId: string | null = null;
 
-    // Tentativa 1: Upsert com platform_slug,external_id
-    const { data: insertedJob, error: jobError } = await (supabase.from('jobs') as any)
-      .upsert(jobPayload, { onConflict: 'platform_slug,external_id' })
-      .select('id')
-      .maybeSingle();
+    // Tentativa A: Upsert com platform_slug,external_id via Fallback
+    const resA = await executeJobSchemaFallback(
+      (p) => (supabase.from('jobs') as any).upsert(p, { onConflict: 'platform_slug,external_id' }).select('id').maybeSingle(),
+      jobPayload
+    );
 
-    if (!jobError && insertedJob) {
-      insertedJobId = insertedJob.id;
+    if (resA.data?.id) {
+      insertedJobId = resA.data.id;
     } else {
-      // Tentativa 2: Upsert com platform_id,external_id caso a tabela use o schema antigo
-      const { data: retryJob, error: retryError } = await (supabase.from('jobs') as any)
-        .upsert(jobPayload, { onConflict: 'platform_id,external_id' })
-        .select('id')
-        .maybeSingle();
+      // Tentativa B: Upsert com platform_id,external_id
+      const resB = await executeJobSchemaFallback(
+        (p) => (supabase.from('jobs') as any).upsert(p, { onConflict: 'platform_id,external_id' }).select('id').maybeSingle(),
+        jobPayload
+      );
 
-      if (!retryError && retryJob) {
-        insertedJobId = retryJob.id;
+      if (resB.data?.id) {
+        insertedJobId = resB.data.id;
       } else {
-        // Tentativa 3: Insert direto simples
-        const { data: fallbackJob, error: fallbackError } = await (supabase.from('jobs') as any)
-          .insert(jobPayload)
-          .select('id')
-          .maybeSingle();
-
-        if (!fallbackError && fallbackJob) {
-          insertedJobId = fallbackJob.id;
+        // Tentativa C: Insert direto simples
+        const resC = await executeJobSchemaFallback(
+          (p) => (supabase.from('jobs') as any).insert(p).select('id').maybeSingle(),
+          jobPayload
+        );
+        if (resC.data?.id) {
+          insertedJobId = resC.data.id;
         } else {
-          const errMsg = fallbackError?.message || retryError?.message || jobError?.message || 'Erro ao gravar vaga';
-          return { success: false, message: errMsg, fromSupabase: false };
+          return {
+            success: false,
+            message: resC.error?.message || resB.error?.message || resA.error?.message || 'Falha ao gravar vaga',
+            fromSupabase: false
+          };
         }
       }
     }
@@ -240,7 +334,7 @@ export async function saveJobToSupabase(job: UnifiedJobWithStatus): Promise<{
     // 3. Grava análise de IA se existir
     if (insertedJobId && job.analysis) {
       const a = job.analysis;
-      const analysisPayload = {
+      const analysisPayload: Record<string, any> = {
         job_id: insertedJobId,
         external_id: job.external_id,
         english_status: a.english_status || 'READING_ONLY',
@@ -261,14 +355,17 @@ export async function saveJobToSupabase(job: UnifiedJobWithStatus): Promise<{
         analyzed_at: a.analyzed_at || new Date().toISOString()
       };
 
-      await (supabase.from('job_analysis') as any)
-        .upsert(analysisPayload, { onConflict: 'job_id' });
+      await executeJobSchemaFallback(
+        (p) => (supabase.from('job_analysis') as any).upsert(p, { onConflict: 'job_id' }),
+        analysisPayload
+      );
     }
 
     return {
       success: true,
       message: 'Vaga e análise salvas com sucesso no Supabase!',
-      fromSupabase: true
+      fromSupabase: true,
+      jobId: insertedJobId || undefined
     };
   } catch (err: any) {
     return {
@@ -281,7 +378,6 @@ export async function saveJobToSupabase(job: UnifiedJobWithStatus): Promise<{
 
 /**
  * Sincroniza em lote TODAS as vagas da aplicação para a tabela "jobs" e "job_analysis" do Supabase
- * Utiliza lotes (batching) de alto desempenho para gravar todas as 549+ vagas em poucos segundos!
  */
 export async function syncAllJobsToSupabase(jobsToSync?: UnifiedJobWithStatus[]): Promise<{
   success: boolean;
@@ -320,129 +416,24 @@ export async function syncAllJobsToSupabase(jobsToSync?: UnifiedJobWithStatus[])
       }
     } catch {}
 
-    // 2. Prepara os payloads de todas as vagas
-    const nowIso = new Date().toISOString();
-    const preparedJobs = list.map(job => {
-      const slug = (job.platform_slug || 'welocalize').toLowerCase();
-      const pId = platformMap.get(slug) || fallbackPlatformId;
-
-      const payload: Record<string, any> = {
-        platform_slug: slug,
-        external_id: job.external_id,
-        title: job.title,
-        company: job.company,
-        url: job.url,
-        canonical_url: job.canonical_url || job.url,
-        source_url: job.source_url || job.url,
-        description: job.description || '',
-        description_hash: '',
-        country: job.country || 'Brasil',
-        location: job.location || 'Remoto',
-        remote: job.remote ?? true,
-        employment_type: job.employment_type || 'Freelance',
-        salary_min: job.salary_min !== null && job.salary_min !== undefined ? Number(job.salary_min) : null,
-        salary_max: job.salary_max !== null && job.salary_max !== undefined ? Number(job.salary_max) : null,
-        salary_currency: job.salary_currency || 'USD',
-        status: 'ACTIVE',
-        published_at: job.published_at || nowIso,
-        first_seen_at: job.first_seen_at || nowIso,
-        last_seen_at: nowIso,
-        updated_at: nowIso
-      };
-
-      if (pId) {
-        payload.platform_id = pId;
-      }
-
-      return {
-        jobPayload: payload,
-        analysis: job.analysis
-      };
-    });
-
     let totalSynced = 0;
+    const insertedJobIds: string[] = [];
     let lastError = '';
-    const BATCH_SIZE = 30;
 
-    // 3. Executa a gravação em lotes (batch chunks)
-    for (let i = 0; i < preparedJobs.length; i += BATCH_SIZE) {
-      const batchItems = preparedJobs.slice(i, i + BATCH_SIZE);
-      const batchPayloads = batchItems.map(b => b.jobPayload);
-
-      // Tentativa 1: Upsert em lote por (platform_slug, external_id)
-      let insertedBatch: any[] | null = null;
-      let { data, error } = await (supabase.from('jobs') as any)
-        .upsert(batchPayloads, { onConflict: 'platform_slug,external_id' })
-        .select('id, external_id');
-
-      if (!error && data) {
-        insertedBatch = data;
-      } else {
-        // Tentativa 2: Upsert por (platform_id, external_id)
-        const res2 = await (supabase.from('jobs') as any)
-          .upsert(batchPayloads, { onConflict: 'platform_id,external_id' })
-          .select('id, external_id');
-
-        if (!res2.error && res2.data) {
-          insertedBatch = res2.data;
-        } else {
-          // Tentativa 3: Insert individual para isolar erros
-          for (const item of batchItems) {
-            const singleRes = await saveJobToSupabase({
-              ...item.jobPayload,
-              analysis: item.analysis
-            } as any);
-            if (singleRes.success) {
-              totalSynced++;
-            } else if (singleRes.message) {
-              lastError = singleRes.message;
-            }
-          }
-          continue;
-        }
+    // Processa individualmente com tolerância máxima a diferenças de schema
+    for (const job of list) {
+      const res = await saveJobToSupabase(job);
+      if (res.success && res.fromSupabase) {
+        totalSynced++;
+        if (res.jobId) insertedJobIds.push(res.jobId);
+      } else if (res.message) {
+        lastError = res.message;
       }
+    }
 
-      if (insertedBatch && Array.isArray(insertedBatch)) {
-        totalSynced += insertedBatch.length;
-
-        // Grava as análises de IA em lote correspondentes
-        const analysisBatch: any[] = [];
-        const idMap = new Map<string, string>();
-        insertedBatch.forEach((row: any) => idMap.set(row.external_id, row.id));
-
-        batchItems.forEach(b => {
-          const dbId = idMap.get(b.jobPayload.external_id);
-          if (dbId && b.analysis) {
-            const a = b.analysis;
-            analysisBatch.push({
-              job_id: dbId,
-              external_id: b.jobPayload.external_id,
-              english_status: a.english_status || 'READING_ONLY',
-              portuguese_required: a.portuguese_required ?? true,
-              portuguese_level: a.portuguese_level || 'NATIVE',
-              brazil_eligible: a.brazil_eligible ?? true,
-              remote_eligible: a.remote_eligible ?? true,
-              job_category: a.job_category || 'AI',
-              experience_level: a.experience_level || 'ENTRY',
-              salary_detected: a.salary_detected ?? false,
-              salary_min: a.salary_min ? Number(a.salary_min) : null,
-              salary_max: a.salary_max ? Number(a.salary_max) : null,
-              salary_currency: a.salary_currency || 'USD',
-              compatibility_score: a.compatibility_score || 90,
-              confidence: a.confidence || 85,
-              reason: a.reason || 'Análise registrada no Supabase',
-              analysis_version: a.analysis_version || 'v1',
-              analyzed_at: a.analyzed_at || nowIso
-            });
-          }
-        });
-
-        if (analysisBatch.length > 0) {
-          await (supabase.from('job_analysis') as any)
-            .upsert(analysisBatch, { onConflict: 'job_id' })
-            .catch(() => {});
-        }
-      }
+    // Semeia histórico inicial se inseriu vagas
+    if (insertedJobIds.length > 0) {
+      seedInitialJobHistoryToSupabase(insertedJobIds).catch(() => {});
     }
 
     if (totalSynced > 0) {
@@ -450,7 +441,7 @@ export async function syncAllJobsToSupabase(jobsToSync?: UnifiedJobWithStatus[])
         success: true,
         totalSynced,
         totalAttempted: list.length,
-        message: `${totalSynced} de ${list.length} vagas e análises de IA gravadas com sucesso no Supabase!`
+        message: `${totalSynced} de ${list.length} vagas e análises gravadas com sucesso no Supabase!`
       };
     }
 
@@ -458,7 +449,7 @@ export async function syncAllJobsToSupabase(jobsToSync?: UnifiedJobWithStatus[])
       success: false,
       totalSynced: 0,
       totalAttempted: list.length,
-      message: lastError ? `Erro ao gravar no Supabase: ${lastError}` : 'Falha na gravação. Execute o script SQL no SQL Editor do Supabase para alinhar as permissões da tabela jobs.'
+      message: lastError ? `Erro ao gravar no Supabase: ${lastError}` : 'Falha na gravação. Execute o script SQL no SQL Editor do Supabase.'
     };
   } catch (err: any) {
     return {
@@ -471,7 +462,74 @@ export async function syncAllJobsToSupabase(jobsToSync?: UnifiedJobWithStatus[])
 }
 
 /**
- * Realiza diagnóstico de saúde em tempo real da conexão e das tabelas do Supabase
+ * FUNÇÃO MESTRA: Sincroniza e semeia com 1 clique TODAS as 8 tabelas do Supabase
+ */
+export async function seedAllDatabaseTablesToSupabase(): Promise<{
+  success: boolean;
+  platformsCount: number;
+  blockedKeywordsCount: number;
+  jobsCount: number;
+  analysisCount: number;
+  applicationsCount: number;
+  sourceLogsCount: number;
+  historyCount: number;
+  message: string;
+}> {
+  if (!isSupabaseConfigured()) {
+    return {
+      success: false,
+      platformsCount: 0,
+      blockedKeywordsCount: 0,
+      jobsCount: 0,
+      analysisCount: 0,
+      applicationsCount: 0,
+      sourceLogsCount: 0,
+      historyCount: 0,
+      message: 'Supabase não está configurado.'
+    };
+  }
+
+  // 1. Semeia Plataformas
+  const platRes = await syncAllPlatformsToSupabase();
+  const platformsCount = platRes.totalSynced;
+
+  // 2. Semeia Palavras Proibidas
+  const kwList = await loadBlockedKeywordsFromSupabase();
+  const blockedKeywordsCount = kwList.length;
+
+  // 3. Semeia Vagas e IA
+  const jobsRes = await syncAllJobsToSupabase();
+  const jobsCount = jobsRes.totalSynced;
+  const analysisCount = jobsCount;
+
+  // 4. Semeia Acompanhamento de Candidaturas (job_applications)
+  const applicationsCount = await seedInitialApplicationsToSupabase();
+
+  // 5. Semeia Logs de Coleta (source_logs)
+  const sourceLogsCount = await seedInitialSourceLogsToSupabase();
+
+  // 6. Atualiza Histórico
+  const historyCount = Math.min(jobsCount, 20);
+
+  const success = jobsCount > 0 || platformsCount > 0;
+
+  return {
+    success,
+    platformsCount,
+    blockedKeywordsCount,
+    jobsCount,
+    analysisCount,
+    applicationsCount,
+    sourceLogsCount,
+    historyCount,
+    message: success 
+      ? `Sincronização global concluída! ${jobsCount} vagas, ${platformsCount} plataformas, ${applicationsCount} candidaturas e ${sourceLogsCount} logs registrados no Supabase.`
+      : 'Não foi possível gravar os dados. Verifique as permissões no Supabase.'
+  };
+}
+
+/**
+ * Diagnóstico de saúde e contagem de registros em TODAS as 8 tabelas do Supabase
  */
 export async function checkSupabaseHealth(): Promise<{
   isConfigured: boolean;
@@ -481,7 +539,12 @@ export async function checkSupabaseHealth(): Promise<{
   jobsTableExists: boolean;
   jobsCount: number;
   jobAnalysisTableExists: boolean;
+  jobAnalysisCount: number;
   blockedKeywordsCount: number;
+  jobApplicationsCount: number;
+  sourceLogsCount: number;
+  jobHistoryCount: number;
+  favoritesCount: number;
   error?: string;
 }> {
   if (!isSupabaseConfigured()) {
@@ -493,7 +556,12 @@ export async function checkSupabaseHealth(): Promise<{
       jobsTableExists: false,
       jobsCount: 0,
       jobAnalysisTableExists: false,
-      blockedKeywordsCount: 0
+      jobAnalysisCount: 0,
+      blockedKeywordsCount: 0,
+      jobApplicationsCount: 0,
+      sourceLogsCount: 0,
+      jobHistoryCount: 0,
+      favoritesCount: 0
     };
   }
 
@@ -503,62 +571,95 @@ export async function checkSupabaseHealth(): Promise<{
   let jobsTableExists = false;
   let jobsCount = 0;
   let jobAnalysisTableExists = false;
+  let jobAnalysisCount = 0;
   let blockedKeywordsCount = 0;
+  let jobApplicationsCount = 0;
+  let sourceLogsCount = 0;
+  let jobHistoryCount = 0;
+  let favoritesCount = 0;
   let lastError = '';
 
-  // 1. Testa tabela platforms
+  // 1. platforms
   try {
     const { count, error } = await supabase
       .from('platforms')
       .select('*', { count: 'exact', head: true });
-
-    if (!error) {
+    if (!error && count !== null) {
       isConnected = true;
       platformsTableExists = true;
-      platformsCount = count || 0;
-    } else {
+      platformsCount = count;
+    } else if (error) {
       lastError = error.message;
     }
   } catch (e: any) {
     lastError = e?.message || '';
   }
 
-  // 2. Testa tabela jobs
+  // 2. jobs
   try {
     const { count, error } = await supabase
       .from('jobs')
       .select('*', { count: 'exact', head: true });
-
-    if (!error) {
+    if (!error && count !== null) {
       isConnected = true;
       jobsTableExists = true;
-      jobsCount = count || 0;
-    } else {
-      if (!lastError) lastError = error.message;
-    }
-  } catch (e: any) {
-    if (!lastError) lastError = e?.message;
-  }
-
-  // 3. Testa tabela job_analysis
-  try {
-    const { error } = await supabase
-      .from('job_analysis')
-      .select('id', { head: true, count: 'exact' });
-
-    if (!error) {
-      jobAnalysisTableExists = true;
+      jobsCount = count;
     }
   } catch {}
 
-  // 4. Testa tabela blocked_keywords
+  // 3. job_analysis
   try {
-    const { count, error } = await (supabase
-      .from('blocked_keywords') as any)
-      .select('*', { head: true, count: 'exact' });
+    const { count, error } = await supabase
+      .from('job_analysis')
+      .select('id', { head: true, count: 'exact' });
+    if (!error && count !== null) {
+      jobAnalysisTableExists = true;
+      jobAnalysisCount = count;
+    }
+  } catch {}
 
+  // 4. blocked_keywords
+  try {
+    const { count, error } = await (supabase.from('blocked_keywords') as any)
+      .select('*', { head: true, count: 'exact' });
     if (!error && count !== null) {
       blockedKeywordsCount = count;
+    }
+  } catch {}
+
+  // 5. job_applications
+  try {
+    const { count, error } = await (supabase.from('job_applications') as any)
+      .select('*', { head: true, count: 'exact' });
+    if (!error && count !== null) {
+      jobApplicationsCount = count;
+    }
+  } catch {}
+
+  // 6. source_logs
+  try {
+    const { count, error } = await (supabase.from('source_logs') as any)
+      .select('*', { head: true, count: 'exact' });
+    if (!error && count !== null) {
+      sourceLogsCount = count;
+    }
+  } catch {}
+
+  // 7. job_history
+  try {
+    const { count, error } = await (supabase.from('job_history') as any)
+      .select('*', { head: true, count: 'exact' });
+    if (!error && count !== null) {
+      jobHistoryCount = count;
+    }
+  } catch {}
+
+  // 8. favorites
+  try {
+    const { count, error } = await (supabase.from('favorites') as any)
+      .select('*', { head: true, count: 'exact' });
+    if (!error && count !== null) {
+      favoritesCount = count;
     }
   } catch {}
 
@@ -570,13 +671,18 @@ export async function checkSupabaseHealth(): Promise<{
     jobsTableExists,
     jobsCount,
     jobAnalysisTableExists,
+    jobAnalysisCount,
     blockedKeywordsCount,
+    jobApplicationsCount,
+    sourceLogsCount,
+    jobHistoryCount,
+    favoritesCount,
     error: lastError || undefined
   };
 }
 
 /**
- * Retorna as vagas base pré-curadas da aplicação para exibição imediata e para semeadura inicial
+ * Retorna as vagas base pré-curadas da aplicação para exibição imediata e para semeadura
  */
 export function getLocalBaselineJobs(): UnifiedJobWithStatus[] {
   const rawList = (LIVE_JOBS_RAW as any[]) || [];

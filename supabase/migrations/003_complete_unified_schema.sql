@@ -31,7 +31,6 @@ CREATE TABLE IF NOT EXISTS platforms (
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Ajustes idempotentes para garantir colunas em caso de tabelas já existentes
 ALTER TABLE platforms 
   ADD COLUMN IF NOT EXISTS notes TEXT DEFAULT '',
   ADD COLUMN IF NOT EXISTS user_status VARCHAR(50) DEFAULT 'NOT_REGISTERED',
@@ -76,7 +75,6 @@ CREATE TABLE IF NOT EXISTS jobs (
     CONSTRAINT uq_platform_slug_external_id UNIQUE (platform_slug, external_id)
 );
 
--- Correções e flexibilizações caso a tabela jobs já existisse com constraints restritivas
 ALTER TABLE jobs 
   ADD COLUMN IF NOT EXISTS platform_slug VARCHAR(150),
   ADD COLUMN IF NOT EXISTS description_hash VARCHAR(64) DEFAULT '',
@@ -95,7 +93,6 @@ ALTER TABLE jobs ALTER COLUMN description_hash SET DEFAULT '';
 ALTER TABLE jobs ALTER COLUMN description DROP NOT NULL;
 ALTER TABLE jobs ALTER COLUMN description SET DEFAULT '';
 
--- Garante constraint única por (platform_slug, external_id)
 DO $$
 BEGIN
     ALTER TABLE jobs DROP CONSTRAINT IF EXISTS uq_platform_external_id;
@@ -106,7 +103,7 @@ EXCEPTION
     WHEN OTHERS THEN NULL;
 END $$;
 
--- 3. TABELA DE ANÁLISE DE IA DAS VAGAS (job_analysis)
+-- 3. TABELA DE ANÁLISE DE IA (job_analysis)
 CREATE TABLE IF NOT EXISTS job_analysis (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     job_id UUID NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
@@ -130,6 +127,13 @@ CREATE TABLE IF NOT EXISTS job_analysis (
     analyzed_at TIMESTAMPTZ DEFAULT NOW(),
     CONSTRAINT uq_job_analysis_job_id UNIQUE (job_id)
 );
+
+DO $$
+BEGIN
+    ALTER TABLE job_analysis ALTER COLUMN english_status TYPE VARCHAR(50);
+EXCEPTION
+    WHEN OTHERS THEN NULL;
+END $$;
 
 -- 4. TABELA DE CANDIDATURAS & ACOMPANHAMENTO (job_applications)
 CREATE TABLE IF NOT EXISTS job_applications (
@@ -155,6 +159,7 @@ CREATE TABLE IF NOT EXISTS blocked_keywords (
 -- 6. TABELA DE LOGS DE COLETA (source_logs)
 CREATE TABLE IF NOT EXISTS source_logs (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    platform_id UUID REFERENCES platforms(id) ON DELETE CASCADE,
     platform_slug VARCHAR(150) NOT NULL,
     started_at TIMESTAMPTZ DEFAULT NOW(),
     finished_at TIMESTAMPTZ,
@@ -166,21 +171,46 @@ CREATE TABLE IF NOT EXISTS source_logs (
     error_message TEXT
 );
 
--- 7. ÍNDICES DE PERFORMANCE
+ALTER TABLE source_logs ALTER COLUMN platform_id DROP NOT NULL;
+ALTER TABLE source_logs ADD COLUMN IF NOT EXISTS platform_slug VARCHAR(150);
+
+-- 7. TABELA DE HISTÓRICO DE STATUS (job_history)
+CREATE TABLE IF NOT EXISTS job_history (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    job_id UUID NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+    event_type VARCHAR(50) NOT NULL,
+    old_status VARCHAR(50),
+    new_status VARCHAR(50),
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 8. TABELA DE FAVORITOS (favorites)
+CREATE TABLE IF NOT EXISTS favorites (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id UUID,
+    job_id UUID NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 9. ÍNDICES DE PERFORMANCE
 CREATE INDEX IF NOT EXISTS idx_platforms_slug ON platforms(slug);
 CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status);
 CREATE INDEX IF NOT EXISTS idx_jobs_platform_slug ON jobs(platform_slug);
 CREATE INDEX IF NOT EXISTS idx_jobs_published_at ON jobs(published_at DESC);
 CREATE INDEX IF NOT EXISTS idx_job_analysis_job_id ON job_analysis(job_id);
 CREATE INDEX IF NOT EXISTS idx_job_analysis_score ON job_analysis(compatibility_score DESC);
+CREATE INDEX IF NOT EXISTS idx_job_applications_slug ON job_applications(platform_slug);
+CREATE INDEX IF NOT EXISTS idx_source_logs_slug ON source_logs(platform_slug);
 
--- 8. POLÍTICAS DE ROW LEVEL SECURITY (RLS) - Permite leitura e escrita
+-- 10. POLÍTICAS DE ROW LEVEL SECURITY (RLS) - Permite leitura e escrita irrestritas para anon e authenticated
 ALTER TABLE platforms ENABLE ROW LEVEL SECURITY;
 ALTER TABLE jobs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE job_analysis ENABLE ROW LEVEL SECURITY;
 ALTER TABLE job_applications ENABLE ROW LEVEL SECURITY;
 ALTER TABLE blocked_keywords ENABLE ROW LEVEL SECURITY;
 ALTER TABLE source_logs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE job_history ENABLE ROW LEVEL SECURITY;
+ALTER TABLE favorites ENABLE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS "Public access platforms" ON platforms;
 CREATE POLICY "Public access platforms" ON platforms FOR ALL USING (true) WITH CHECK (true);
@@ -200,7 +230,17 @@ CREATE POLICY "Public access blocked_keywords" ON blocked_keywords FOR ALL USING
 DROP POLICY IF EXISTS "Public access source_logs" ON source_logs;
 CREATE POLICY "Public access source_logs" ON source_logs FOR ALL USING (true) WITH CHECK (true);
 
--- 9. SEED DAS 13 PLATAFORMAS OFICIAIS
+DROP POLICY IF EXISTS "Public access job_history" ON job_history;
+CREATE POLICY "Public access job_history" ON job_history FOR ALL USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Public access favorites" ON favorites;
+CREATE POLICY "Public access favorites" ON favorites FOR ALL USING (true) WITH CHECK (true);
+
+-- Permissões explícitas de GRANT
+GRANT ALL ON ALL TABLES IN SCHEMA public TO anon, authenticated, service_role;
+GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO anon, authenticated, service_role;
+
+-- 11. SEED DAS 13 PLATAFORMAS OFICIAIS
 INSERT INTO platforms (name, slug, website_url, jobs_url, connector_type, category, currency, english_requirement, process_type, average_pay_rate, payment_methods, notes, status, enabled)
 VALUES
     ('Welocalize', 'welocalize', 'https://www.welocalize.com', 'https://www.welocalize.com/careers/', 'LEVER_API', 'Treinamento de IA & Avaliação', 'USD', 'READING_ONLY', 'ONLINE_EXAM', '$5.00 - $8.50 / hora', '{"Hyperwallet","Wire Transfer"}', 'Excelente para brasileiros. Testes teóricos de guidelines com consulta permitida. Sem chamadas orais.', 'HEALTHY', true),
@@ -229,5 +269,5 @@ ON CONFLICT (slug) DO UPDATE SET
     notes = EXCLUDED.notes,
     updated_at = NOW();
 
--- 10. RECARREGA CACHE DO SCHEMA POSTGREST
+-- 12. RECARREGA CACHE DO SCHEMA POSTGREST
 NOTIFY pgrst, 'reload schema';

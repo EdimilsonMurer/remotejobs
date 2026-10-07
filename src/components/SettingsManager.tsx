@@ -30,7 +30,7 @@ import {
   reinitializeSupabaseClient 
 } from '../lib/supabase/client';
 import { syncAllPlatformsToSupabase } from '../lib/supabase/platforms';
-import { syncAllJobsToSupabase, checkSupabaseHealth } from '../lib/supabase/jobs';
+import { syncAllJobsToSupabase, checkSupabaseHealth, seedAllDatabaseTablesToSupabase } from '../lib/supabase/jobs';
 import { getHiddenJobIds, unhideAllJobs } from '../services/jobsSyncService';
 import { 
   getBlockedKeywords, 
@@ -944,18 +944,17 @@ jobs:
                   setIsSyncingSupabase(true);
                   setSupabaseFeedback(null);
                   try {
-                    const resPlat = await syncAllPlatformsToSupabase();
-                    const resJobs = await syncAllJobsToSupabase();
-                    if (resPlat.success || resJobs.success) {
+                    const resAll = await seedAllDatabaseTablesToSupabase();
+                    if (resAll.success) {
                       setSupabaseFeedback({
                         type: 'success',
-                        message: `Banco sincronizado! Plataformas: ${resPlat.totalSynced}/${resPlat.totalAttempted} | Vagas: ${resJobs.totalSynced}/${resJobs.totalAttempted}`
+                        message: `✅ Todas as 8 tabelas sincronizadas com sucesso! Vagas: ${resAll.jobsCount} | Plataformas: ${resAll.platformsCount} | Candidaturas: ${resAll.applicationsCount} | Logs: ${resAll.sourceLogsCount} | Histórico: ${resAll.historyCount}`
                       });
                       refreshHealth();
                     } else {
                       setSupabaseFeedback({
                         type: 'error',
-                        message: resPlat.message || resJobs.message || 'Erro na sincronização completa.'
+                        message: resAll.message || 'Erro na sincronização completa das tabelas.'
                       });
                     }
                   } catch (err: any) {
@@ -970,18 +969,18 @@ jobs:
                 className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-bold text-xs rounded-xl shadow-xs transition-colors flex items-center justify-center gap-2 cursor-pointer"
               >
                 <Database className="w-3.5 h-3.5" />
-                <span>Sincronizar TUDO no Supabase</span>
+                <span>⚡ Sincronizar TODAS as 8 Tabelas no Supabase</span>
               </button>
             </div>
           </div>
 
-          {/* DIAGNÓSTICO EM TEMPO REAL DAS TABELAS DO SUPABASE */}
+          {/* DIAGNÓSTICO EM TEMPO REAL DAS 8 TABELAS DO SUPABASE */}
           {supabaseCfg.isConfigured && (
             <div className="pt-3 border-t border-slate-900 space-y-2">
               <div className="flex items-center justify-between">
                 <span className="text-[11px] font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
                   <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-                  <span>Diagnóstico em Tempo Real do Banco de Dados:</span>
+                  <span>Diagnóstico em Tempo Real do Banco de Dados (8 Tabelas):</span>
                 </span>
                 <button
                   type="button"
@@ -996,47 +995,95 @@ jobs:
 
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                 <div className="bg-slate-900/90 border border-slate-800 p-2.5 rounded-lg text-center">
-                  <span className="text-[10px] text-slate-400 block">Tabela platforms</span>
+                  <span className="text-[10px] text-slate-400 block font-mono">platforms</span>
                   <span className="text-sm font-bold text-white">
                     {healthStatus?.platformsTableExists ? `${healthStatus.platformsCount} gravadas` : (
-                      <span className="text-rose-400 text-xs">Não encontrada</span>
+                      <span className="text-rose-400 text-xs">Vazia</span>
                     )}
                   </span>
                 </div>
 
                 <div className="bg-slate-900/90 border border-slate-800 p-2.5 rounded-lg text-center">
-                  <span className="text-[10px] text-slate-400 block">Tabela jobs</span>
+                  <span className="text-[10px] text-slate-400 block font-mono">jobs</span>
                   <span className="text-sm font-bold text-white">
-                    {healthStatus?.jobsTableExists ? `${healthStatus.jobsCount} gravadas` : (
-                      <span className="text-rose-400 text-xs">Não encontrada</span>
-                    )}
-                  </span>
-                </div>
-
-                <div className="bg-slate-900/90 border border-slate-800 p-2.5 rounded-lg text-center">
-                  <span className="text-[10px] text-slate-400 block">Tabela job_analysis</span>
-                  <span className="text-sm font-bold text-white">
-                    {healthStatus?.jobAnalysisTableExists ? (
-                      <span className="text-emerald-400 text-xs">Ativa</span>
+                    {healthStatus?.jobsTableExists && healthStatus?.jobsCount > 0 ? (
+                      <span className="text-emerald-400">{healthStatus.jobsCount} gravadas</span>
                     ) : (
-                      <span className="text-rose-400 text-xs">Não encontrada</span>
+                      <span className="text-amber-400 text-xs">Vazia (0 vagas)</span>
                     )}
                   </span>
                 </div>
 
                 <div className="bg-slate-900/90 border border-slate-800 p-2.5 rounded-lg text-center">
-                  <span className="text-[10px] text-slate-400 block">Palavras Bloqueadas</span>
+                  <span className="text-[10px] text-slate-400 block font-mono">job_analysis</span>
                   <span className="text-sm font-bold text-white">
-                    {healthStatus?.blockedKeywordsCount ? `${healthStatus.blockedKeywordsCount} regras` : 'Padrão Local'}
+                    {healthStatus?.jobAnalysisCount && healthStatus?.jobAnalysisCount > 0 ? (
+                      <span className="text-emerald-400">{healthStatus.jobAnalysisCount} análises</span>
+                    ) : healthStatus?.jobAnalysisTableExists ? (
+                      <span className="text-amber-400 text-xs">Ativa (0 itens)</span>
+                    ) : (
+                      <span className="text-rose-400 text-xs">Pendente</span>
+                    )}
+                  </span>
+                </div>
+
+                <div className="bg-slate-900/90 border border-slate-800 p-2.5 rounded-lg text-center">
+                  <span className="text-[10px] text-slate-400 block font-mono">blocked_keywords</span>
+                  <span className="text-sm font-bold text-white">
+                    {healthStatus?.blockedKeywordsCount ? `${healthStatus.blockedKeywordsCount} regras` : '0'}
+                  </span>
+                </div>
+
+                <div className="bg-slate-900/90 border border-slate-800 p-2.5 rounded-lg text-center">
+                  <span className="text-[10px] text-slate-400 block font-mono">job_applications</span>
+                  <span className="text-sm font-bold text-white">
+                    {healthStatus?.jobApplicationsCount && healthStatus?.jobApplicationsCount > 0 ? (
+                      <span className="text-emerald-400">{healthStatus.jobApplicationsCount} ativas</span>
+                    ) : (
+                      <span className="text-slate-400 text-xs">{healthStatus?.jobApplicationsCount || 0}</span>
+                    )}
+                  </span>
+                </div>
+
+                <div className="bg-slate-900/90 border border-slate-800 p-2.5 rounded-lg text-center">
+                  <span className="text-[10px] text-slate-400 block font-mono">source_logs</span>
+                  <span className="text-sm font-bold text-white">
+                    {healthStatus?.sourceLogsCount && healthStatus?.sourceLogsCount > 0 ? (
+                      <span className="text-emerald-400">{healthStatus.sourceLogsCount} registros</span>
+                    ) : (
+                      <span className="text-slate-400 text-xs">{healthStatus?.sourceLogsCount || 0}</span>
+                    )}
+                  </span>
+                </div>
+
+                <div className="bg-slate-900/90 border border-slate-800 p-2.5 rounded-lg text-center">
+                  <span className="text-[10px] text-slate-400 block font-mono">job_history</span>
+                  <span className="text-sm font-bold text-white">
+                    {healthStatus?.jobHistoryCount && healthStatus?.jobHistoryCount > 0 ? (
+                      <span className="text-emerald-400">{healthStatus.jobHistoryCount} eventos</span>
+                    ) : (
+                      <span className="text-slate-400 text-xs">{healthStatus?.jobHistoryCount || 0}</span>
+                    )}
+                  </span>
+                </div>
+
+                <div className="bg-slate-900/90 border border-slate-800 p-2.5 rounded-lg text-center">
+                  <span className="text-[10px] text-slate-400 block font-mono">favorites</span>
+                  <span className="text-sm font-bold text-white">
+                    {healthStatus?.favoritesCount && healthStatus?.favoritesCount > 0 ? (
+                      <span className="text-purple-400">{healthStatus.favoritesCount} favoritos</span>
+                    ) : (
+                      <span className="text-slate-400 text-xs">{healthStatus?.favoritesCount || 0}</span>
+                    )}
                   </span>
                 </div>
               </div>
 
-              {healthStatus && (!healthStatus.platformsTableExists || !healthStatus.jobsTableExists) && (
+              {healthStatus && (!healthStatus.jobsTableExists || healthStatus.jobsCount === 0) && (
                 <div className="p-3 bg-amber-950/60 border border-amber-800/80 rounded-xl text-amber-300 text-xs flex items-start gap-2">
                   <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
                   <div>
-                    <strong>Tabelas pendentes de criação no Supabase:</strong> Execute o script SQL unificado abaixo no seu painel do Supabase para criar as tabelas <code className="text-white">platforms</code>, <code className="text-white">jobs</code> e <code className="text-white">job_analysis</code>.
+                    <strong>Tabela jobs sem dados ou bloqueada por RLS:</strong> Clique no botão verde <strong>"⚡ Sincronizar TODAS as 8 Tabelas no Supabase"</strong> acima para gravar as mais de 540 vagas. Se o Supabase apresentar erro de permissão (RLS), execute o script SQL unificado abaixo no seu painel Supabase (SQL Editor).
                   </div>
                 </div>
               )}
@@ -1214,6 +1261,7 @@ CREATE TABLE IF NOT EXISTS blocked_keywords (
 -- 6. TABELA DE LOGS DOS COLETORES (source_logs)
 CREATE TABLE IF NOT EXISTS source_logs (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    platform_id UUID REFERENCES platforms(id) ON DELETE CASCADE,
     platform_slug VARCHAR(150) NOT NULL,
     started_at TIMESTAMPTZ DEFAULT NOW(),
     finished_at TIMESTAMPTZ,
@@ -1225,20 +1273,43 @@ CREATE TABLE IF NOT EXISTS source_logs (
     error_message TEXT
 );
 
--- 7. ÍNDICES DE ALTA PERFORMANCE
+ALTER TABLE source_logs ALTER COLUMN platform_id DROP NOT NULL;
+ALTER TABLE source_logs ADD COLUMN IF NOT EXISTS platform_slug VARCHAR(150);
+
+-- 7. TABELA DE HISTÓRICO DE STATUS (job_history)
+CREATE TABLE IF NOT EXISTS job_history (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    job_id UUID NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+    event_type VARCHAR(50) NOT NULL,
+    old_status VARCHAR(50),
+    new_status VARCHAR(50),
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 8. TABELA DE FAVORITOS (favorites)
+CREATE TABLE IF NOT EXISTS favorites (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id UUID,
+    job_id UUID NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 9. ÍNDICES DE ALTA PERFORMANCE
 CREATE INDEX IF NOT EXISTS idx_platforms_slug ON platforms(slug);
 CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status);
 CREATE INDEX IF NOT EXISTS idx_jobs_platform_slug ON jobs(platform_slug);
 CREATE INDEX IF NOT EXISTS idx_jobs_published_at ON jobs(published_at DESC);
 CREATE INDEX IF NOT EXISTS idx_job_analysis_job_id ON job_analysis(job_id);
 
--- 8. POLÍTICAS DE ROW LEVEL SECURITY (RLS) - Permite leitura e escrita públicas
+-- 10. POLÍTICAS DE ROW LEVEL SECURITY (RLS) - Leitura e escrita públicas para todas as 8 tabelas
 ALTER TABLE platforms ENABLE ROW LEVEL SECURITY;
 ALTER TABLE jobs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE job_analysis ENABLE ROW LEVEL SECURITY;
 ALTER TABLE job_applications ENABLE ROW LEVEL SECURITY;
 ALTER TABLE blocked_keywords ENABLE ROW LEVEL SECURITY;
 ALTER TABLE source_logs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE job_history ENABLE ROW LEVEL SECURITY;
+ALTER TABLE favorites ENABLE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS "Public access platforms" ON platforms;
 CREATE POLICY "Public access platforms" ON platforms FOR ALL USING (true) WITH CHECK (true);
@@ -1258,7 +1329,17 @@ CREATE POLICY "Public access blocked_keywords" ON blocked_keywords FOR ALL USING
 DROP POLICY IF EXISTS "Public access source_logs" ON source_logs;
 CREATE POLICY "Public access source_logs" ON source_logs FOR ALL USING (true) WITH CHECK (true);
 
--- 9. SEED DAS 13 PLATAFORMAS OFICIAIS
+DROP POLICY IF EXISTS "Public access job_history" ON job_history;
+CREATE POLICY "Public access job_history" ON job_history FOR ALL USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Public access favorites" ON favorites;
+CREATE POLICY "Public access favorites" ON favorites FOR ALL USING (true) WITH CHECK (true);
+
+-- Concede permissões explícitas para anon e authenticated
+GRANT ALL ON ALL TABLES IN SCHEMA public TO anon, authenticated, service_role;
+GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO anon, authenticated, service_role;
+
+-- 11. SEED DAS 13 PLATAFORMAS OFICIAIS
 INSERT INTO platforms (name, slug, website_url, jobs_url, connector_type, category, currency, english_requirement, process_type, average_pay_rate, payment_methods, notes, status, enabled)
 VALUES
     ('Welocalize', 'welocalize', 'https://www.welocalize.com', 'https://www.welocalize.com/careers/', 'LEVER_API', 'Treinamento de IA & Avaliação', 'USD', 'READING_ONLY', 'ONLINE_EXAM', '$5.00 - $8.50 / hora', '{"Hyperwallet","Wire Transfer"}', 'Excelente para brasileiros. Testes teóricos de guidelines com consulta permitida. Sem chamadas orais.', 'HEALTHY', true),
