@@ -258,7 +258,7 @@ export async function syncAllPlatformsToSupabase(platformsToSync?: Platform[]): 
  * Carrega a lista de plataformas do Supabase ou utiliza os valores locais
  */
 export async function loadPlatformsFromSupabase(): Promise<Platform[]> {
-  // 1. Obtém lista atual do localStorage
+  // 1. Obtém lista atual do localStorage como fallback
   let localList: Platform[] = [...INITIAL_PLATFORMS];
   try {
     const saved = localStorage.getItem('remotehunter_platforms_v1');
@@ -282,32 +282,36 @@ export async function loadPlatformsFromSupabase(): Promise<Platform[]> {
       .select('*')
       .order('name', { ascending: true });
 
-    if (error || !data || data.length === 0) {
+    if (error) {
+      console.warn('[Supabase] Erro na consulta de plataformas:', error.message);
       return localList;
     }
 
-    // 2. Mescla os dados remotos mantendo TODAS as plataformas (sem apagar novas cadastradas localmente)
-    const mergedMap = new Map<string, Platform>();
+    // Se o Supabase possui registros, o Supabase é a fonte da verdade oficial!
+    if (data && data.length > 0) {
+      const dbPlatforms: Platform[] = data.map((row: any) => {
+        const slug = (row.slug || '').toLowerCase();
+        const fallback = INITIAL_PLATFORMS.find(
+          p => p.id.toLowerCase() === slug || p.name.toLowerCase() === (row.name || '').toLowerCase()
+        );
+        return databaseRowToPlatform(row, fallback);
+      });
 
-    // Inicializa com as locais
-    localList.forEach(p => {
-      mergedMap.set(p.id.toLowerCase(), p);
-    });
+      // Atualiza o cache local para refletir exatamente o banco de dados
+      try {
+        localStorage.setItem('remotehunter_platforms_v1', JSON.stringify(dbPlatforms));
+      } catch {}
 
-    // Atualiza ou insere do Supabase
-    data.forEach((row: any) => {
-      const slug = (row.slug || '').toLowerCase();
-      const existingFallback = mergedMap.get(slug) || localList.find(p => p.name.toLowerCase() === row.name?.toLowerCase());
-      const converted = databaseRowToPlatform(row, existingFallback);
-      mergedMap.set(converted.id.toLowerCase(), converted);
-    });
+      return dbPlatforms;
+    }
 
-    const result = Array.from(mergedMap.values());
-    try {
-      localStorage.setItem('remotehunter_platforms_v1', JSON.stringify(result));
-    } catch {}
+    // Se o banco de dados estiver vazio (0 plataformas), faz semeadura inicial
+    if (data && data.length === 0) {
+      console.log('🌱 [Supabase] Semeando plataformas iniciais no Supabase...');
+      syncAllPlatformsToSupabase(INITIAL_PLATFORMS).catch(() => {});
+    }
 
-    return result;
+    return localList;
   } catch (err) {
     console.warn('[Supabase] Falha ao carregar plataformas, usando fallback local:', err);
     return localList;
@@ -315,12 +319,25 @@ export async function loadPlatformsFromSupabase(): Promise<Platform[]> {
 }
 
 /**
- * Remove uma plataforma do Supabase
+ * Remove uma plataforma do Supabase e do cache local
  */
 export async function deletePlatformFromSupabase(platformIdOrSlug: string): Promise<boolean> {
-  if (!isSupabaseConfigured()) return false;
+  const slug = platformIdOrSlug.toLowerCase();
+
+  // 1. Remove do localStorage imediatamente
   try {
-    const slug = platformIdOrSlug.toLowerCase();
+    const saved = localStorage.getItem('remotehunter_platforms_v1');
+    if (saved) {
+      const parsed: Platform[] = JSON.parse(saved);
+      const filtered = parsed.filter(p => p.id.toLowerCase() !== slug && p.id !== platformIdOrSlug);
+      localStorage.setItem('remotehunter_platforms_v1', JSON.stringify(filtered));
+    }
+  } catch {}
+
+  if (!isSupabaseConfigured()) return true;
+
+  // 2. Remove do Supabase
+  try {
     await supabase.from('platforms').delete().or(`slug.eq.${slug},id.eq.${platformIdOrSlug}`);
     return true;
   } catch (err) {

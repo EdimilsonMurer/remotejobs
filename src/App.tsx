@@ -50,15 +50,30 @@ export default function App() {
     return sortPlatformsAlphabetically(INITIAL_PLATFORMS);
   });
 
-  // Carrega do Supabase em segundo plano ao inicializar
+  // Carrega do Supabase e sincroniza em tempo real
   useEffect(() => {
-    loadPlatformsFromSupabase().then(loaded => {
-      if (loaded && loaded.length > 0) {
-        setPlatforms(sortPlatformsAlphabetically(loaded));
-      }
-    }).catch(err => {
-      console.warn('[Supabase] Usando cache local:', err);
-    });
+    const fetchLivePlatforms = () => {
+      loadPlatformsFromSupabase().then(loaded => {
+        if (loaded && loaded.length > 0) {
+          setPlatforms(sortPlatformsAlphabetically(loaded));
+        }
+      }).catch(err => {
+        console.warn('[Supabase] Usando cache local:', err);
+      });
+    };
+
+    fetchLivePlatforms();
+
+    const vercelHandler = () => fetchLivePlatforms();
+    const focusHandler = () => fetchLivePlatforms();
+
+    window.addEventListener('supabase-configured-from-vercel', vercelHandler);
+    window.addEventListener('focus', focusHandler);
+
+    return () => {
+      window.removeEventListener('supabase-configured-from-vercel', vercelHandler);
+      window.removeEventListener('focus', focusHandler);
+    };
   }, []);
 
   const [blacklistRules, setBlacklistRules] = useState<BlacklistRule[]>(() => {
