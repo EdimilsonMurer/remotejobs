@@ -3,14 +3,6 @@ import { supabase, isSupabaseConfigured } from '../lib/supabase/client';
 export const DEFAULT_BLOCKED_KEYWORDS: string[] = [
   'italiano',
   'italian',
-  'inglês',
-  'ingles',
-  'english',
-  'bilíngue',
-  'bilingue',
-  'bilingual',
-  'espanhol',
-  'spanish',
   'alemão',
   'alemao',
   'german',
@@ -24,7 +16,11 @@ export const DEFAULT_BLOCKED_KEYWORDS: string[] = [
   'mandarin',
   'chinês',
   'chines',
-  'chinese'
+  'chinese',
+  'russo',
+  'russian',
+  'coreano',
+  'korean'
 ];
 
 const STORAGE_KEY_BLOCKED_KEYWORDS = 'remotehunter_blocked_keywords_v2';
@@ -49,6 +45,15 @@ export function getBlockedKeywords(): string[] {
     if (raw) {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed) && parsed.length > 0) {
+        // Purge unwanted blocked words like english/inglês/espanhol if present from v1/v2
+        const cleaned = parsed.filter(w => {
+          const n = normalizeKeyword(w);
+          return !['ingles', 'english', 'espanhol', 'spanish', 'bilingue', 'bilingual'].includes(n);
+        });
+        if (cleaned.length !== parsed.length) {
+          localStorage.setItem(STORAGE_KEY_BLOCKED_KEYWORDS, JSON.stringify(cleaned));
+          return cleaned;
+        }
         return parsed;
       }
     }
