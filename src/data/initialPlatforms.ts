@@ -2,6 +2,36 @@ import { Platform, BlacklistRule } from '../types/job';
 
 export const INITIAL_PLATFORMS: Platform[] = [
   {
+    id: 'alignerr',
+    name: 'Alignerr',
+    websiteUrl: 'https://www.alignerr.com/',
+    careersUrl: 'https://www.alignerr.com/',
+    category: 'Treinamento de IA & Avaliação de Prompts',
+    currency: 'USD',
+    englishRequirement: 'READING_ONLY',
+    processType: 'ONLINE_EXAM',
+    status: 'FAVORITE',
+    paymentMethods: ['Deel', 'PayPal'],
+    notes: 'Paga em Dólar por hora/projeto. Testes práticos online focados em escrita e raciocínio em português.',
+    averagePayRate: '$15.00 - $35.00 / hora',
+    userStatus: 'NOT_REGISTERED'
+  },
+  {
+    id: 'bairesdev',
+    name: 'BairesDev',
+    websiteUrl: 'https://www.bairesdev.com/',
+    careersUrl: 'https://jobs.bairesdev.com/',
+    category: 'Consultoria & Outsourcing',
+    currency: 'USD',
+    englishRequirement: 'FLUENT_INTERVIEW',
+    processType: 'LIVE_INTERVIEW',
+    status: 'BLACKLIST',
+    blacklistReason: 'Processo longo de seleção com múltiplas entrevistas orais em inglês.',
+    paymentMethods: ['Wire'],
+    notes: 'Bloqueada por exigir entrevista falada em inglês.',
+    userStatus: 'NOT_REGISTERED'
+  },
+  {
     id: 'clickworker',
     name: 'Clickworker & UHRS',
     websiteUrl: 'https://www.clickworker.com/',
@@ -32,6 +62,21 @@ export const INITIAL_PLATFORMS: Platform[] = [
     userStatus: 'NOT_REGISTERED'
   },
   {
+    id: 'dataannotation',
+    name: 'DataAnnotation',
+    websiteUrl: 'https://www.dataannotation.tech/',
+    careersUrl: 'https://www.dataannotation.tech/',
+    category: 'Treinamento e Avaliação de IA',
+    currency: 'USD',
+    englishRequirement: 'READING_ONLY',
+    processType: 'ONLINE_EXAM',
+    status: 'FAVORITE',
+    paymentMethods: ['PayPal'],
+    notes: 'Trabalho 100% remoto focado em avaliação e treinamento de modelos de linguagem (LLMs).',
+    averagePayRate: '$20.00 - $40.00 / hora',
+    userStatus: 'NOT_REGISTERED'
+  },
+  {
     id: 'hubdata',
     name: 'HubData (DataHub)',
     websiteUrl: 'https://ai.hub.xyz/r/30p73q8r',
@@ -44,6 +89,21 @@ export const INITIAL_PLATFORMS: Platform[] = [
     paymentMethods: ['PayPal', 'Crypto / Stablecoin', 'Transferência'],
     notes: 'Plataforma para microtarefas e anotação de dados de IA. Cadastro rápido sem exigência de entrevista.',
     averagePayRate: '$5.00 - $15.00 / projeto',
+    userStatus: 'NOT_REGISTERED'
+  },
+  {
+    id: 'micro1',
+    name: 'Micro1',
+    websiteUrl: 'https://www.micro1.ai/',
+    careersUrl: 'https://www.micro1.ai/jobs',
+    category: 'Tech & Desenvolvimento',
+    currency: 'USD',
+    englishRequirement: 'FLUENT_INTERVIEW',
+    processType: 'LIVE_INTERVIEW',
+    status: 'BLACKLIST',
+    blacklistReason: 'Exige entrevista técnica ao vivo em inglês fluente com recrutadores internacionais.',
+    paymentMethods: ['Wire'],
+    notes: 'Bloqueada automaticamente pelo sistema devido à exigência de entrevista oral em inglês.',
     userStatus: 'NOT_REGISTERED'
   },
   {
@@ -77,6 +137,21 @@ export const INITIAL_PLATFORMS: Platform[] = [
     userStatus: 'NOT_REGISTERED'
   },
   {
+    id: 'peroptyx',
+    name: 'Peroptyx',
+    websiteUrl: 'https://www.peroptyx.com/',
+    careersUrl: 'https://www.peroptyx.com/careers',
+    category: 'Avaliação de Mapas & Qualidade de Dados',
+    currency: 'USD',
+    englishRequirement: 'READING_ONLY',
+    processType: 'ONLINE_EXAM',
+    status: 'ACTIVE',
+    paymentMethods: ['Transferência Bancária'],
+    notes: 'Avaliação de dados geográficos e qualidade de mapas para o Brasil.',
+    averagePayRate: '$6.00 - $14.00 / hora',
+    userStatus: 'NOT_REGISTERED'
+  },
+  {
     id: 'prolific',
     name: 'Prolific',
     websiteUrl: 'https://www.prolific.com/',
@@ -104,6 +179,21 @@ export const INITIAL_PLATFORMS: Platform[] = [
     paymentMethods: ['CLT / PJ'],
     notes: 'Principal portal de vagas 100% remotas no Brasil em Português nas áreas de suporte, administração, marketing e tech.',
     averagePayRate: 'R$ 2.000 - R$ 12.000 / mês',
+    userStatus: 'NOT_REGISTERED'
+  },
+  {
+    id: 'rws',
+    name: 'RWS',
+    websiteUrl: 'https://www.rws.com/',
+    careersUrl: 'https://www.rws.com/careers/',
+    category: 'Tradução, Localização & IA',
+    currency: 'USD',
+    englishRequirement: 'READING_ONLY',
+    processType: 'ONLINE_EXAM',
+    status: 'ACTIVE',
+    paymentMethods: ['Transferência Internacional', 'PayPal'],
+    notes: 'Líder global em serviços de linguagem, tradução e avaliação de IA.',
+    averagePayRate: '$5.00 - $16.00 / hora',
     userStatus: 'NOT_REGISTERED'
   },
   {
@@ -137,52 +227,6 @@ export const INITIAL_PLATFORMS: Platform[] = [
     userStatus: 'NOT_REGISTERED'
   },
   {
-    id: 'welocalize',
-    name: 'Welocalize',
-    websiteUrl: 'https://www.welocalize.com/',
-    careersUrl: 'https://www.welocalize.com/careers/',
-    category: 'Treinamento de IA, Avaliação de Busca & Localização',
-    currency: 'USD',
-    englishRequirement: 'READING_ONLY',
-    processType: 'ONLINE_EXAM',
-    status: 'FAVORITE',
-    paymentMethods: ['Hyperwallet', 'Wire Transfer', 'Conta Bancária'],
-    notes: 'Paga em Dólar. Vagas frequentes de "Search Quality Rater" e "Ads Rater" em Português do Brasil. O processo é 100% por teste de qualificação online (sem entrevista oral).',
-    averagePayRate: '$4.50 - $15.00 / hora',
-    userStatus: 'NOT_REGISTERED'
-  },
-  // PLATAFORMAS NA LISTA NEGRA (BLACKLIST) - SEMPRE NO FINAL
-  {
-    id: 'bairesdev',
-    name: 'BairesDev',
-    websiteUrl: 'https://www.bairesdev.com/',
-    careersUrl: 'https://jobs.bairesdev.com/',
-    category: 'Consultoria & Outsourcing',
-    currency: 'USD',
-    englishRequirement: 'FLUENT_INTERVIEW',
-    processType: 'LIVE_INTERVIEW',
-    status: 'BLACKLIST',
-    blacklistReason: 'Processo longo de seleção com múltiplas entrevistas orais em inglês.',
-    paymentMethods: ['Wire'],
-    notes: 'Bloqueada por exigir entrevista falada em inglês.',
-    userStatus: 'NOT_REGISTERED'
-  },
-  {
-    id: 'micro1',
-    name: 'Micro1',
-    websiteUrl: 'https://www.micro1.ai/',
-    careersUrl: 'https://www.micro1.ai/jobs',
-    category: 'Tech & Desenvolvimento',
-    currency: 'USD',
-    englishRequirement: 'FLUENT_INTERVIEW',
-    processType: 'LIVE_INTERVIEW',
-    status: 'BLACKLIST',
-    blacklistReason: 'Exige entrevista técnica ao vivo em inglês fluente com recrutadores internacionais.',
-    paymentMethods: ['Wire'],
-    notes: 'Bloqueada automaticamente pelo sistema devido à exigência de entrevista oral em inglês.',
-    userStatus: 'NOT_REGISTERED'
-  },
-  {
     id: 'turing',
     name: 'Turing',
     websiteUrl: 'https://www.turing.com/',
@@ -195,6 +239,21 @@ export const INITIAL_PLATFORMS: Platform[] = [
     blacklistReason: 'Exige testes avançados e entrevistas de comunicação em inglês fluente.',
     paymentMethods: ['Wire'],
     notes: 'Bloqueada da busca por exigir proficiência e entrevista oral em inglês.',
+    userStatus: 'NOT_REGISTERED'
+  },
+  {
+    id: 'welocalize',
+    name: 'Welocalize',
+    websiteUrl: 'https://www.welocalize.com/',
+    careersUrl: 'https://www.welocalize.com/careers/',
+    category: 'Treinamento de IA, Avaliação de Busca & Localização',
+    currency: 'USD',
+    englishRequirement: 'READING_ONLY',
+    processType: 'ONLINE_EXAM',
+    status: 'FAVORITE',
+    paymentMethods: ['Hyperwallet', 'Wire Transfer', 'Conta Bancária'],
+    notes: 'Paga em Dólar. Vagas frequentes de "Search Quality Rater" e "Ads Rater" em Português do Brasil. O processo é 100% por teste de qualificação online (sem entrevista oral).',
+    averagePayRate: '$4.50 - $15.00 / hora',
     userStatus: 'NOT_REGISTERED'
   }
 ];

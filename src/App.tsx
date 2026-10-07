@@ -16,38 +16,44 @@ import { loadPlatformsFromSupabase, savePlatformToSupabase } from './lib/supabas
 const STORAGE_KEY_PLATFORMS = 'remotehunter_platforms_v1';
 const STORAGE_KEY_RULES = 'remotehunter_blacklist_rules_v1';
 
+const sortPlatformsAlphabetically = (list: Platform[]): Platform[] => {
+  return [...list].sort((a, b) => a.name.localeCompare(b.name, 'pt-BR', { sensitivity: 'base' }));
+};
+
 export default function App() {
   const [activeTab, setActiveTab] = useState<'jobs' | 'platforms' | 'blacklist' | 'crewai' | 'guide' | 'pipeline' | 'settings'>('jobs');
   
-  // Load state from localStorage with fallbacks & auto-migration
+  // Load state from localStorage with fallbacks & auto-migration (sempre em ordem alfabética)
   const [platforms, setPlatforms] = useState<Platform[]>(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEY_PLATFORMS);
       if (saved) {
         const parsed: Platform[] = JSON.parse(saved);
-        // Auto-fix any deprecated lever.co links or broken URLs
-        return parsed.map(p => {
-          if (p.id === 'welocalize' && (p.careersUrl?.includes('jobs.lever.co') || p.websiteUrl?.includes('jobs.lever.co'))) {
-            return {
-              ...p,
-              careersUrl: 'https://www.welocalize.com/careers/',
-              websiteUrl: 'https://www.welocalize.com/'
-            };
-          }
-          return p;
-        });
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          const migrated = parsed.map(p => {
+            if (p.id === 'welocalize' && (p.careersUrl?.includes('jobs.lever.co') || p.websiteUrl?.includes('jobs.lever.co'))) {
+              return {
+                ...p,
+                careersUrl: 'https://www.welocalize.com/careers/',
+                websiteUrl: 'https://www.welocalize.com/'
+              };
+            }
+            return p;
+          });
+          return sortPlatformsAlphabetically(migrated);
+        }
       }
     } catch (e) {
       console.error('Error loading platforms from storage:', e);
     }
-    return INITIAL_PLATFORMS;
+    return sortPlatformsAlphabetically(INITIAL_PLATFORMS);
   });
 
   // Carrega do Supabase em segundo plano ao inicializar
   useEffect(() => {
     loadPlatformsFromSupabase().then(loaded => {
       if (loaded && loaded.length > 0) {
-        setPlatforms(loaded);
+        setPlatforms(sortPlatformsAlphabetically(loaded));
       }
     }).catch(err => {
       console.warn('[Supabase] Usando cache local:', err);
@@ -125,11 +131,21 @@ export default function App() {
   // Handlers
   const handleSavePlatform = (savedPlatform: Platform) => {
     setPlatforms(prev => {
-      const exists = prev.some(p => p.id === savedPlatform.id);
+      const targetSlug = savedPlatform.id.toLowerCase();
+      const targetName = savedPlatform.name.trim().toLowerCase();
+      const exists = prev.some(p => p.id.toLowerCase() === targetSlug || p.name.trim().toLowerCase() === targetName);
+      let updated: Platform[];
       if (exists) {
-        return prev.map(p => p.id === savedPlatform.id ? savedPlatform : p);
+        updated = prev.map(p => (p.id.toLowerCase() === targetSlug || p.name.trim().toLowerCase() === targetName) ? savedPlatform : p);
+      } else {
+        updated = [savedPlatform, ...prev];
       }
-      return [savedPlatform, ...prev];
+      try {
+        localStorage.setItem(STORAGE_KEY_PLATFORMS, JSON.stringify(updated));
+      } catch (e) {
+        console.error('Error saving platforms:', e);
+      }
+      return updated;
     });
 
     // Salva no Supabase e em cache local

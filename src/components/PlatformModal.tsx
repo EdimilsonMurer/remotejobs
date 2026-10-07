@@ -136,19 +136,26 @@ export const PlatformModal: React.FC<PlatformModalProps> = ({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!name.trim()) return;
+    if (!name.trim()) {
+      setAutofillError('Por favor, informe o nome da plataforma.');
+      return;
+    }
+
+    const cleanSlug = editingPlatform 
+      ? editingPlatform.id 
+      : name.trim().toLowerCase().replace(/[^a-z0-9]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '') || `platform-${Date.now()}`;
 
     const newPlatform: Platform = {
-      id: editingPlatform ? editingPlatform.id : `platform-${Date.now()}`,
+      id: cleanSlug,
       name: name.trim(),
       websiteUrl: websiteUrl.trim() || 'https://',
       careersUrl: careersUrl.trim() || websiteUrl.trim() || 'https://',
-      category: category.trim(),
+      category: category.trim() || 'Treinamento de IA & Avaliação',
       currency,
       englishRequirement,
       processType,
       status,
-      blacklistReason: status === 'BLACKLIST' ? blacklistReason.trim() : undefined,
+      blacklistReason: status === 'BLACKLIST' ? (blacklistReason.trim() || 'Adicionada à lista negra') : undefined,
       paymentMethods: paymentMethods.split(',').map(s => s.trim()).filter(Boolean),
       averagePayRate: averagePayRate.trim() || undefined,
       notes: notes.trim(),

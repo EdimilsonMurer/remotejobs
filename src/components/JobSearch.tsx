@@ -558,8 +558,6 @@ export const JobSearch: React.FC<JobSearchProps> = ({
     ];
 
     return combined.sort((a, b) => {
-      if (!a.isBlocked && b.isBlocked) return -1;
-      if (a.isBlocked && !b.isBlocked) return 1;
       return a.name.localeCompare(b.name, 'pt-BR', { sensitivity: 'base' });
     });
   }, [platforms, jobsList]);

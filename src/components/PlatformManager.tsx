@@ -129,17 +129,9 @@ export const PlatformManager: React.FC<PlatformManagerProps> = ({
     return true;
   });
 
-  // Ordenação Alfabética (A-Z), mantendo as plataformas bloqueadas (BLACKLIST) sempre no final
+  // Ordenação Alfabética Estrita (A-Z) de todas as plataformas
   const sortedPlatforms = React.useMemo(() => {
     return [...filteredPlatforms].sort((a, b) => {
-      const aBlocked = a.status === 'BLACKLIST';
-      const bBlocked = b.status === 'BLACKLIST';
-
-      // Bloqueadas vão para o final
-      if (!aBlocked && bBlocked) return -1;
-      if (aBlocked && !bBlocked) return 1;
-
-      // Ordem alfabética de A a Z
       return a.name.localeCompare(b.name, 'pt-BR', { sensitivity: 'base' });
     });
   }, [filteredPlatforms]);
