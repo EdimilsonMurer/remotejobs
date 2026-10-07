@@ -162,10 +162,13 @@ export const JobSearch: React.FC<JobSearchProps> = ({
   // Carrega vagas persistidas diretamente do Supabase PostgreSQL
   useEffect(() => {
     const fetchJobs = () => {
-      loadJobsFromSupabase().then(({ jobs: dbJobs, fromSupabase, totalCount }) => {
+      loadJobsFromSupabase().then(({ jobs: dbJobs, fromSupabase, totalCount, lastUpdatedAt }) => {
         if (fromSupabase && totalCount > 0) {
           setIsSupabaseLive(true);
           setJobsList(applyNewJobFlags(dbJobs));
+          if (lastUpdatedAt) {
+            setLastSyncFormatted(formatSyncDateTime(lastUpdatedAt));
+          }
         } else if (fromSupabase && totalCount === 0) {
           // Supabase conectado com 0 vagas: faz semeadura inicial automática
           setIsSupabaseLive(true);

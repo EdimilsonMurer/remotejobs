@@ -107,17 +107,30 @@ export async function loadJobsFromSupabase(): Promise<{
 
     console.log(`✅ [Supabase] ${convertedList.length} vagas carregadas diretamente do banco PostgreSQL!`);
 
+    // Obtém a data mais recente de atualização entre as vagas
+    let latestUpdateIso: string | null = null;
+    for (const j of jobsRows) {
+      const ts = j.updated_at || j.first_seen_at || j.published_at;
+      if (ts) {
+        if (!latestUpdateIso || new Date(ts).getTime() > new Date(latestUpdateIso).getTime()) {
+          latestUpdateIso = ts;
+        }
+      }
+    }
+
     return {
       jobs: convertedList,
       fromSupabase: true,
-      totalCount: convertedList.length
+      totalCount: convertedList.length,
+      lastUpdatedAt: latestUpdateIso
     };
   } catch (err: any) {
     console.warn('[Supabase Jobs] Falha na requisição ao Supabase, utilizando base local:', err?.message);
     return {
       jobs: getLocalBaselineJobs(),
       fromSupabase: false,
-      totalCount: 0
+      totalCount: 0,
+      lastUpdatedAt: null
     };
   }
 }
