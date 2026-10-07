@@ -30,6 +30,9 @@ function saveToStoredCache(key: string, value: string): void {
  * Dicionário heurístico de tradução rápida para termos comuns de vagas de IA e trabalho remoto
  */
 const COMMON_PHRASES: [RegExp, string][] = [
+  [/About Welocalize/gi, 'Sobre a Welocalize'],
+  [/Welocalize, a Welo Global brand, serves localization teams through AI-enabled multilingual content solutions that enable enterprises to operate and scale globally\./gi, 'A Welocalize, uma marca global Welo, atende equipes de localização por meio de soluções de conteúdo multilíngue habilitadas por IA que permitem às empresas operar e escalar globalmente.'],
+  [/Welocalize combines AI, automation, and human expertise to support enterprises in more than 300 languages, enabling accurate, culturally aligned, and compliant multilingual content at scale\./gi, 'A Welocalize combina inteligência artificial, automação e experiência humana para apoiar empresas em mais de 300 idiomas, permitindo a criação de conteúdo multilíngue preciso, culturalmente alinhado e em conformidade em grande escala.'],
   [/Welo Data is an award-winning localization and data transformation company\. We run one of the world[’']s largest Ads Rating Programs and we want you to join!/gi, 'A Welo Data é uma empresa premiada de localização e transformação de dados. Operamos um dos maiores programas de avaliação de anúncios publicitários (Ads Rating) do mundo e queremos você em nosso time!'],
   [/As an Ads Quality Rater, you will review and grade internet advertisements to help shape how ads are delivered to the end users\./gi, 'Como Avaliador de Qualidade de Anúncios (Ads Quality Rater), você revisará e classificará anúncios da internet para ajudar a calibrar como os anúncios são exibidos aos usuários.'],
   [/In other words, you[’']ll tell the AI program how good or bad its advertisement suggestions are based on the user[’']s keywords\./gi, 'Em outras palavras, você ensinará o sistema de inteligência artificial quão boas ou ruins são as sugestões de anúncios com base nas palavras-chave pesquisadas pelos usuários.'],
@@ -72,7 +75,8 @@ const COMMON_PHRASES: [RegExp, string][] = [
   [/work with multicultural, international team with a great variety of documents and content types/gi, 'Trabalho com equipe internacional multicultural'],
   [/24-hour 6-day a week support from our Community team\./gi, 'Suporte comunitário ativo para esclarecimento de dúvidas.'],
   [/If this opportunity sounds appealing to you, apply below\./gi, 'Se esta vaga combina com o seu perfil, candidate-se no link oficial abaixo.'],
-  [/What You’ll Need/gi, 'Requisitos Necessários'],
+  [/What You[’']ll Need/gi, 'Requisitos Necessários'],
+  [/What You['’]re Looking For/gi, 'O Que Procuramos'],
   [/Why Join Us\?/gi, 'Por que Trabalhar Conosco?'],
   [/About our projects:/gi, 'Sobre Nossos Projetos:'],
   [/How to Apply\?/gi, 'Como se Candidatar?'],
