@@ -1,3 +1,5 @@
+import { JobAnalysis } from '../../types/job';
+
 export interface RawJob {
   id: string | number;
   [key: string]: any;
@@ -20,6 +22,7 @@ export interface NormalizedJob {
   salary_max?: number | null;
   salary_currency?: string | null;
   published_at: string;
+  analysis?: JobAnalysis;
 }
 
 export interface ConnectorStatus {

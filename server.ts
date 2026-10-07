@@ -7,6 +7,7 @@ import { GoogleGenAI, Type } from '@google/genai';
 import { matchKnownPlatform, inferPlatformDefaults, extractCleanDomain } from './src/services/platformKnowledge';
 import { WelocalizeConnector } from './src/connectors/welocalize';
 import { TuringConnector } from './src/connectors/turing';
+import { ConnectorRegistry } from './src/connectors/registry';
 import seedAllHandler from './api/supabase/seed-all.ts';
 
 dotenv.config();
