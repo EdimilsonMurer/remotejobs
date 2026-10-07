@@ -719,62 +719,70 @@ jobs:
 
         {/* AJUDA DE CRIAÇÃO DA TABELA (SQL MIGRATION HELPER) */}
         <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-3">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
             <span className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
               <Server className="w-4 h-4 text-amber-400" />
-              <span>Instruções: Não vê as plataformas no seu Supabase?</span>
+              <span>Instruções: Como criar ou atualizar a tabela 'platforms' no seu Supabase</span>
             </span>
             <button
               type="button"
               onClick={() => {
-                const sqlScript = `-- SQL para criar a tabela 'platforms' no seu Supabase:
+                const sqlScript = `-- 1. Garante que a tabela 'platforms' existe:
 CREATE TABLE IF NOT EXISTS platforms (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     name VARCHAR(100) NOT NULL UNIQUE,
     slug VARCHAR(100) NOT NULL UNIQUE,
     website_url TEXT NOT NULL,
     jobs_url TEXT NOT NULL,
-    connector_type VARCHAR(50) NOT NULL DEFAULT 'LEVER_API',
-    category VARCHAR(150) DEFAULT 'Treinamento de IA',
-    currency VARCHAR(10) DEFAULT 'USD',
-    english_requirement VARCHAR(50) DEFAULT 'READING_ONLY',
-    process_type VARCHAR(50) DEFAULT 'ONLINE_EXAM',
-    user_status VARCHAR(50) DEFAULT 'NOT_REGISTERED',
-    notes TEXT DEFAULT '',
-    average_pay_rate VARCHAR(100),
-    payment_methods TEXT[] DEFAULT '{}',
-    enabled BOOLEAN DEFAULT true,
-    status VARCHAR(50) DEFAULT 'HEALTHY',
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Habilita RLS e permite permissão pública de escrita para a aplicação
+-- 2. Adiciona todas as colunas (inclusive 'average_pay_rate') caso a tabela já existisse:
+ALTER TABLE platforms 
+  ADD COLUMN IF NOT EXISTS notes TEXT DEFAULT '',
+  ADD COLUMN IF NOT EXISTS user_status VARCHAR(50) DEFAULT 'NOT_REGISTERED',
+  ADD COLUMN IF NOT EXISTS category VARCHAR(150) DEFAULT 'Treinamento de IA',
+  ADD COLUMN IF NOT EXISTS currency VARCHAR(10) DEFAULT 'USD',
+  ADD COLUMN IF NOT EXISTS english_requirement VARCHAR(50) DEFAULT 'READING_ONLY',
+  ADD COLUMN IF NOT EXISTS process_type VARCHAR(50) DEFAULT 'ONLINE_EXAM',
+  ADD COLUMN IF NOT EXISTS average_pay_rate VARCHAR(100),
+  ADD COLUMN IF NOT EXISTS payment_methods TEXT[] DEFAULT '{}',
+  ADD COLUMN IF NOT EXISTS connector_type VARCHAR(50) DEFAULT 'LEVER_API',
+  ADD COLUMN IF NOT EXISTS enabled BOOLEAN DEFAULT true,
+  ADD COLUMN IF NOT EXISTS status VARCHAR(50) DEFAULT 'HEALTHY';
+
+-- 3. Habilita RLS e permissão de leitura/escrita para a aplicação:
 ALTER TABLE platforms ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Permitir sincronização de plataformas" ON platforms FOR ALL USING (true) WITH CHECK (true);`;
+DROP POLICY IF EXISTS "Permitir sincronização de plataformas" ON platforms;
+CREATE POLICY "Permitir sincronização de plataformas" ON platforms FOR ALL USING (true) WITH CHECK (true);
+
+-- 4. Notifica o Supabase para atualizar o cache de colunas imediatamente:
+NOTIFY pgrst, 'reload schema';`;
                 navigator.clipboard.writeText(sqlScript);
                 setCopiedSql(true);
                 setTimeout(() => setCopiedSql(false), 3000);
               }}
-              className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-xs font-semibold text-cyan-300 border border-slate-700 rounded-lg flex items-center gap-1.5 transition-colors cursor-pointer"
+              className="px-3.5 py-2 bg-slate-900 hover:bg-slate-800 text-xs font-bold text-cyan-300 border border-cyan-800/60 rounded-lg flex items-center justify-center gap-1.5 transition-colors cursor-pointer shrink-0 shadow-xs"
             >
               {copiedSql ? (
                 <>
-                  <Check className="w-3.5 h-3.5 text-emerald-400" />
-                  <span className="text-emerald-400 font-bold">SQL Copiado!</span>
+                  <Check className="w-4 h-4 text-emerald-400" />
+                  <span className="text-emerald-400 font-bold">SQL Copiado para a Área de Transferência!</span>
                 </>
               ) : (
                 <>
-                  <Copy className="w-3.5 h-3.5" />
-                  <span>Copiar SQL de Criação da Tabela</span>
+                  <Copy className="w-4 h-4 text-cyan-400" />
+                  <span>Copiar SQL de Correção & Atualização da Tabela</span>
                 </>
               )}
             </button>
           </div>
           <p className="text-[11px] text-slate-400 leading-relaxed">
-            1. No seu painel do Supabase, acesse <strong>SQL Editor</strong> &gt; <strong>New Query</strong>.<br />
-            2. Cole o código SQL copiado com o botão acima e clique em <strong>Run</strong>.<br />
-            3. Volte aqui e clique em <strong>"Sincronizar Todas as Plataformas no Supabase Agora"</strong> para popular seu banco de dados na nuvem!
+            Se você recebeu a mensagem sobre a coluna <code className="text-amber-300 font-mono">average_pay_rate</code> ausente:<br />
+            1. No seu painel do Supabase, vá em <strong>SQL Editor</strong> &gt; <strong>New Query</strong>.<br />
+            2. Clique no botão acima para copiar o SQL, cole no editor do Supabase e clique em <strong>Run</strong>.<br />
+            3. <em>(O app agora também adapta o envio automaticamente caso você queira sincronizar de imediato!)</em>
           </p>
         </div>
 

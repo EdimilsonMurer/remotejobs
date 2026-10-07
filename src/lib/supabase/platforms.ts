@@ -48,6 +48,43 @@ export function databaseRowToPlatform(row: any, fallback?: Platform): Platform {
 }
 
 /**
+ * Executa uma operação no Supabase com remoção automática de colunas não encontradas no schema cache.
+ * Isso garante que mesmo que o banco Supabase do usuário ainda não tenha recebido a migração
+ * com colunas novas (ex: 'average_pay_rate', 'payment_methods', 'notes'), as plataformas continuem sendo salvas!
+ */
+async function executeWithSchemaFallback(
+  operation: (payload: Record<string, any>) => Promise<{ data?: any; error?: any }>,
+  initialPayload: Record<string, any>
+): Promise<{ success: boolean; error?: string; removedColumns: string[] }> {
+  const currentPayload = { ...initialPayload };
+  const removedColumns: string[] = [];
+
+  for (let attempt = 0; attempt < 10; attempt++) {
+    const { error } = await operation(currentPayload);
+
+    if (!error) {
+      return { success: true, removedColumns };
+    }
+
+    const msg = error.message || '';
+    // Padrão PostgREST: "Could not find the 'average_pay_rate' column of 'platforms' in the schema cache"
+    const match = msg.match(/Could not find the '([^']+)' column/i);
+
+    if (match && match[1] && currentPayload.hasOwnProperty(match[1])) {
+      const col = match[1];
+      console.warn(`[Supabase] Coluna '${col}' ausente no schema cache do Supabase. Removendo do envio e tentando novamente...`);
+      delete currentPayload[col];
+      removedColumns.push(col);
+      continue;
+    }
+
+    return { success: false, error: msg, removedColumns };
+  }
+
+  return { success: false, error: 'Muitas colunas ausentes no schema do Supabase.', removedColumns };
+}
+
+/**
  * Salva ou atualiza uma plataforma e suas observações diretamente no Supabase
  */
 export async function savePlatformToSupabase(platform: Platform): Promise<{ success: boolean; message?: string; fromSupabase: boolean }> {
@@ -81,54 +118,79 @@ export async function savePlatformToSupabase(platform: Platform): Promise<{ succ
     const row = platformToDatabaseRow(platform);
     const slug = row.slug;
 
-    // Tenta atualizar pelo slug ou nome
-    const { data: existing, error: findError } = await (supabase
-      .from('platforms') as any)
-      .select('id')
-      .or(`slug.eq.${slug},name.eq.${platform.name}`)
-      .maybeSingle();
+    // Busca segura por slug ou nome sem quebrar caracteres especiais
+    let existing: any = null;
+    try {
+      const { data, error } = await (supabase
+        .from('platforms') as any)
+        .select('id')
+        .eq('slug', slug)
+        .maybeSingle();
 
-    if (findError) {
-      console.warn('[Supabase] Erro ao buscar plataforma:', findError.message);
+      if (!error && data) {
+        existing = data;
+      } else {
+        const { data: byName } = await (supabase
+          .from('platforms') as any)
+          .select('id')
+          .eq('name', platform.name)
+          .maybeSingle();
+        if (byName) existing = byName;
+      }
+    } catch (e: any) {
+      console.warn('[Supabase] Aviso ao buscar plataforma existente:', e?.message);
     }
 
+    let resultError: string | undefined;
+    let removedCols: string[] = [];
+
     if (existing && existing.id) {
-      const { error: updateError } = await (supabase
-        .from('platforms') as any)
-        .update({
-          name: row.name,
-          notes: row.notes,
-          user_status: row.user_status,
-          website_url: row.website_url,
-          jobs_url: row.jobs_url,
-          category: row.category,
-          currency: row.currency,
-          english_requirement: row.english_requirement,
-          process_type: row.process_type,
-          status: row.status,
-          average_pay_rate: row.average_pay_rate,
-          payment_methods: row.payment_methods,
-          updated_at: row.updated_at
-        })
-        .eq('id', existing.id);
+      const updatePayload: Record<string, any> = {
+        name: row.name,
+        notes: row.notes,
+        user_status: row.user_status,
+        website_url: row.website_url,
+        jobs_url: row.jobs_url,
+        category: row.category,
+        currency: row.currency,
+        english_requirement: row.english_requirement,
+        process_type: row.process_type,
+        status: row.status,
+        average_pay_rate: row.average_pay_rate,
+        payment_methods: row.payment_methods,
+        updated_at: row.updated_at
+      };
 
-      if (updateError) {
-        console.error('[Supabase] Erro ao atualizar no Supabase:', updateError.message);
-        return { success: false, message: updateError.message, fromSupabase: false };
-      }
+      const res = await executeWithSchemaFallback(
+        (p) => (supabase.from('platforms') as any).update(p).eq('id', existing.id),
+        updatePayload
+      );
+      if (!res.success) resultError = res.error;
+      removedCols = res.removedColumns;
     } else {
-      const { error: insertError } = await (supabase
-        .from('platforms') as any)
-        .insert(row);
+      const insertPayload: Record<string, any> = { ...row };
 
-      if (insertError) {
-        console.error('[Supabase] Erro ao inserir no Supabase:', insertError.message);
-        return { success: false, message: insertError.message, fromSupabase: false };
-      }
+      const res = await executeWithSchemaFallback(
+        (p) => (supabase.from('platforms') as any).insert(p),
+        insertPayload
+      );
+      if (!res.success) resultError = res.error;
+      removedCols = res.removedColumns;
+    }
+
+    if (resultError) {
+      console.error(`[Supabase] Erro ao salvar plataforma "${platform.name}":`, resultError);
+      return { success: false, message: resultError, fromSupabase: false };
     }
 
     console.log(`✅ [Supabase] Plataforma "${platform.name}" sincronizada com sucesso!`);
-    return { success: true, message: 'Salvo com sucesso no Supabase!', fromSupabase: true };
+    return { 
+      success: true, 
+      message: removedCols.length > 0 
+        ? `Salvo no Supabase! (Colunas omitidas: ${removedCols.join(', ')})` 
+        : 'Salvo com sucesso no Supabase!', 
+      fromSupabase: true 
+    };
   } catch (err: any) {
     console.error('[Supabase] Erro na sincronização:', err?.message);
     return { success: false, message: err?.message, fromSupabase: false };
