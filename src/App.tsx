@@ -11,7 +11,7 @@ import { PipelineMonitor } from './components/PipelineMonitor';
 import { Platform, BlacklistRule, JobOpportunity } from './types/job';
 import { INITIAL_PLATFORMS, INITIAL_BLACKLIST_RULES } from './data/initialPlatforms';
 import { CURATED_JOBS } from './data/curatedJobs';
-import { loadPlatformsFromSupabase, savePlatformToSupabase } from './lib/supabase/platforms';
+import { loadPlatformsFromSupabase, savePlatformToSupabase, deletePlatformFromSupabase } from './lib/supabase/platforms';
 import { saveJobToSupabase } from './lib/supabase/jobs';
 
 const STORAGE_KEY_PLATFORMS = 'remotehunter_platforms_v1';
@@ -232,6 +232,7 @@ export default function App() {
 
   const handleDeletePlatform = (id: string) => {
     setPlatforms(prev => prev.filter(p => p.id !== id));
+    deletePlatformFromSupabase(id).catch(err => console.warn('[Supabase] Erro ao deletar plataforma:', err));
   };
 
   const handleAddRule = (rule: BlacklistRule) => {

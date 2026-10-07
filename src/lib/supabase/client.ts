@@ -1,6 +1,9 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { Database } from '../../types/database.types';
 
+// Cache em memória da configuração recebida da Vercel / Servidor
+let serverRuntimeConfig: { url: string; anonKey: string; isConfigured: boolean } | null = null;
+
 export const getSupabaseConfig = () => {
   const envUrl = import.meta.env.VITE_SUPABASE_URL || '';
   const envKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
@@ -13,8 +16,8 @@ export const getSupabaseConfig = () => {
     localKey = localStorage.getItem('remotehunter_supabase_anon_key') || '';
   } catch {}
 
-  const url = (localUrl || envUrl).trim();
-  const anonKey = (localKey || envKey).trim();
+  const url = (serverRuntimeConfig?.url || envUrl || localUrl).trim();
+  const anonKey = (serverRuntimeConfig?.anonKey || envKey || localKey).trim();
 
   const isConfigured = Boolean(
     url && 
@@ -28,7 +31,9 @@ export const getSupabaseConfig = () => {
     url,
     anonKey,
     isConfigured,
-    source: isConfigured ? (localUrl ? 'local' : 'env') : 'none'
+    source: isConfigured 
+      ? (serverRuntimeConfig?.url ? 'vercel' : (envUrl ? 'env' : 'local')) 
+      : 'none'
   };
 };
 
@@ -72,3 +77,35 @@ export const reinitializeSupabaseClient = () => {
   });
   return currentCfg.isConfigured;
 };
+
+/**
+ * Consulta a API da Vercel (/api/config) para carregar as credenciais configuradas nas
+ * variáveis de ambiente do servidor, garantindo que qualquer novo navegador conecte automaticamente!
+ */
+export async function syncConfigFromVercel(): Promise<{ isConfigured: boolean; url: string }> {
+  try {
+    const res = await fetch('/api/config');
+    if (res.ok) {
+      const data = await res.json();
+      if (data && data.isConfigured && data.supabaseUrl && data.supabaseAnonKey) {
+        serverRuntimeConfig = {
+          url: data.supabaseUrl,
+          anonKey: data.supabaseAnonKey,
+          isConfigured: true
+        };
+        reinitializeSupabaseClient();
+        console.log('⚡ [Supabase] Conectado automaticamente via variáveis de ambiente da Vercel!');
+        window.dispatchEvent(new CustomEvent('supabase-configured-from-vercel', { detail: serverRuntimeConfig }));
+        return { isConfigured: true, url: data.supabaseUrl };
+      }
+    }
+  } catch (e: any) {
+    console.warn('[Supabase] Falha ao consultar /api/config:', e?.message);
+  }
+  return { isConfigured: isSupabaseConfigured(), url: getSupabaseConfig().url };
+}
+
+// Dispara hidratação imediata ao carregar o script no navegador
+if (typeof window !== 'undefined') {
+  syncConfigFromVercel().catch(() => {});
+}

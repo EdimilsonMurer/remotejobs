@@ -63,6 +63,40 @@ async function startServer() {
 
   app.use(express.json());
 
+  // Rota de configuração pública do ambiente (Supabase & Vercel)
+  app.get('/api/config', (req, res) => {
+    const supabaseUrl = (
+      process.env.VITE_SUPABASE_URL ||
+      process.env.SUPABASE_URL ||
+      process.env.NEXT_PUBLIC_SUPABASE_URL ||
+      ''
+    ).trim();
+
+    const supabaseAnonKey = (
+      process.env.VITE_SUPABASE_ANON_KEY ||
+      process.env.SUPABASE_ANON_KEY ||
+      process.env.SUPABASE_KEY ||
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
+      ''
+    ).trim();
+
+    const isConfigured = Boolean(
+      supabaseUrl &&
+      supabaseAnonKey &&
+      supabaseUrl.startsWith('https://') &&
+      !supabaseUrl.includes('sua-instancia') &&
+      !supabaseUrl.includes('seu-projeto')
+    );
+
+    return res.json({
+      supabaseUrl: isConfigured ? supabaseUrl : '',
+      supabaseAnonKey: isConfigured ? supabaseAnonKey : '',
+      isConfigured,
+      source: isConfigured ? 'server_environment' : 'none',
+      hasGemini: Boolean(geminiApiKey)
+    });
+  });
+
   // Rota de autofill com Gemini
   app.post('/api/platforms/autofill', async (req, res) => {
     const { url } = req.body;

@@ -50,6 +50,8 @@ export const SettingsManager: React.FC = () => {
   const [copiedSql, setCopiedSql] = useState(false);
   const [healthStatus, setHealthStatus] = useState<any>(null);
   const [isCheckingHealth, setIsCheckingHealth] = useState(false);
+  const [showManualOverride, setShowManualOverride] = useState(false);
+  const [copiedVarName, setCopiedVarName] = useState<string | null>(null);
 
   const refreshHealth = async () => {
     setIsCheckingHealth(true);
@@ -66,6 +68,18 @@ export const SettingsManager: React.FC = () => {
   useEffect(() => {
     refreshHealth();
   }, [supabaseCfg.isConfigured]);
+
+  useEffect(() => {
+    const handler = () => {
+      const updated = getSupabaseConfig();
+      setSupabaseCfg(updated);
+      setInputUrl(updated.url);
+      setInputKey(updated.anonKey);
+      refreshHealth();
+    };
+    window.addEventListener('supabase-configured-from-vercel', handler);
+    return () => window.removeEventListener('supabase-configured-from-vercel', handler);
+  }, []);
 
   // Intervalo de busca em horas (padrão: 6 horas)
   const [intervalHours, setIntervalHours] = useState<number>(() => {
@@ -608,96 +622,241 @@ jobs:
           </div>
         )}
 
-        {/* Formulário de Credenciais do Supabase */}
+        {/* Card Principal: Configuração Centralizada na Vercel & Supabase */}
         <div className="bg-slate-950 p-5 rounded-xl border border-slate-800 space-y-4">
-          <div className="flex items-center justify-between">
-            <h3 className="text-xs font-bold text-slate-200 uppercase tracking-wider flex items-center gap-1.5">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <h3 className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-2">
               <KeyRound className="w-4 h-4 text-cyan-400" />
-              <span>Credenciais da API do Supabase</span>
+              <span>Conexão Universal com o Supabase (Hospedado na Vercel)</span>
             </h3>
-            {supabaseCfg.source === 'local' && (
-              <span className="text-[10px] font-semibold text-cyan-300 bg-cyan-950 border border-cyan-800 px-2 py-0.5 rounded">
-                Configurado via UI Local
+
+            {supabaseCfg.isConfigured && (
+              <span className="text-[11px] font-semibold text-emerald-300 bg-emerald-950 border border-emerald-800 px-2.5 py-0.5 rounded-full flex items-center gap-1.5 w-fit">
+                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                <span>Ativo para todos os navegadores</span>
               </span>
             )}
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
-            <div>
-              <label className="block text-slate-300 font-semibold mb-1">
-                URL do Projeto Supabase (Project URL)
-              </label>
-              <input
-                type="url"
-                value={inputUrl}
-                onChange={(e) => setInputUrl(e.target.value)}
-                placeholder="https://seu-projeto.supabase.co"
-                className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-white font-mono placeholder:text-slate-600 focus:outline-hidden focus:border-emerald-400"
-              />
-            </div>
+          {/* Quando já configurado pela Vercel */}
+          {supabaseCfg.isConfigured ? (
+            <div className="p-4 bg-emerald-950/30 border border-emerald-800/80 rounded-xl space-y-3">
+              <div className="flex items-start justify-between gap-3">
+                <div className="space-y-1">
+                  <span className="text-xs font-bold text-emerald-300 flex items-center gap-1.5">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                    <span>Supabase Conectado Automaticamente via Vercel</span>
+                  </span>
+                  <p className="text-[11px] text-slate-300">
+                    As credenciais estão salvas no servidor da Vercel. Qualquer novo navegador, aba anônima ou dispositivo conecta instantaneamente sem precisar digitar chaves.
+                  </p>
+                  <div className="font-mono text-[11px] text-slate-400 pt-1">
+                    URL: <span className="text-cyan-300">{supabaseCfg.url}</span>
+                  </div>
+                </div>
 
-            <div>
-              <label className="block text-slate-300 font-semibold mb-1">
-                Chave Anônima Pública (Anon / Public Key)
-              </label>
-              <input
-                type="password"
-                value={inputKey}
-                onChange={(e) => setInputKey(e.target.value)}
-                placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
-                className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-white font-mono placeholder:text-slate-600 focus:outline-hidden focus:border-emerald-400"
-              />
-            </div>
-          </div>
-
-          <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 pt-2">
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => {
-                  setCustomSupabaseConfig(inputUrl, inputKey);
-                  reinitializeSupabaseClient();
-                  const updated = getSupabaseConfig();
-                  setSupabaseCfg(updated);
-                  if (updated.isConfigured) {
-                    setSupabaseFeedback({
-                      type: 'success',
-                      message: 'Credenciais do Supabase salvas e ativadas no sistema com sucesso!'
-                    });
-                  } else {
-                    setSupabaseFeedback({
-                      type: 'error',
-                      message: 'Credenciais inválidas. Verifique a URL e a Chave do Supabase.'
-                    });
-                  }
-                }}
-                className="px-4 py-2 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs rounded-xl shadow-xs transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
-              >
-                <Check className="w-4 h-4" />
-                <span>Salvar Credenciais</span>
-              </button>
-
-              {(inputUrl || inputKey) && (
                 <button
                   type="button"
-                  onClick={() => {
-                    setCustomSupabaseConfig('', '');
-                    reinitializeSupabaseClient();
-                    const updated = getSupabaseConfig();
-                    setSupabaseCfg(updated);
-                    setInputUrl('');
-                    setInputKey('');
-                    setSupabaseFeedback({
-                      type: 'success',
-                      message: 'Credenciais limpas.'
-                    });
-                  }}
-                  className="px-3 py-2 bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-white border border-slate-700 font-semibold text-xs rounded-xl transition-colors cursor-pointer"
+                  onClick={() => refreshHealth()}
+                  className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-slate-300 text-xs font-semibold rounded-lg border border-slate-700 flex items-center gap-1.5 transition-colors cursor-pointer shrink-0"
                 >
-                  Limpar
+                  <RefreshCw className={`w-3.5 h-3.5 ${isCheckingHealth ? 'animate-spin' : ''}`} />
+                  <span>Testar Conexão</span>
                 </button>
-              )}
+              </div>
             </div>
+          ) : (
+            /* Quando pendente: Instruções exatas para a Vercel */
+            <div className="p-4 bg-blue-950/30 border border-blue-800/80 rounded-xl space-y-3">
+              <div className="flex items-start gap-3">
+                <div className="w-8 h-8 rounded-lg bg-blue-500/20 flex items-center justify-center shrink-0 text-blue-400 mt-0.5">
+                  <Database className="w-4 h-4" />
+                </div>
+                <div className="space-y-1 text-xs text-slate-300">
+                  <span className="font-bold text-white block text-sm">
+                    Como Configurar na Vercel (Uma única vez para todos os navegadores):
+                  </span>
+                  <p className="text-slate-400 leading-relaxed text-[11px]">
+                    Para não precisar digitar credenciais toda vez que abrir o app em outro navegador, basta cadastrar estas duas variáveis nas configurações do seu projeto na Vercel (<strong className="text-white">Settings &gt; Environment Variables</strong>):
+                  </p>
+                </div>
+              </div>
+
+              {/* Cards de Variáveis para copiar com 1 clique */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5 pt-1">
+                <div className="bg-slate-900 p-3 rounded-lg border border-slate-800 flex items-center justify-between gap-2">
+                  <div>
+                    <span className="text-[10px] text-slate-400 block">Nome da Variável 1 (URL):</span>
+                    <span className="font-mono text-xs font-bold text-cyan-300">VITE_SUPABASE_URL</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      navigator.clipboard.writeText('VITE_SUPABASE_URL');
+                      setCopiedVarName('VITE_SUPABASE_URL');
+                      setTimeout(() => setCopiedVarName(null), 2500);
+                    }}
+                    className="p-1.5 hover:bg-slate-800 rounded text-slate-400 hover:text-white transition-colors cursor-pointer"
+                    title="Copiar nome da variável"
+                  >
+                    {copiedVarName === 'VITE_SUPABASE_URL' ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
+                  </button>
+                </div>
+
+                <div className="bg-slate-900 p-3 rounded-lg border border-slate-800 flex items-center justify-between gap-2">
+                  <div>
+                    <span className="text-[10px] text-slate-400 block">Nome da Variável 2 (Chave Anon):</span>
+                    <span className="font-mono text-xs font-bold text-cyan-300">VITE_SUPABASE_ANON_KEY</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      navigator.clipboard.writeText('VITE_SUPABASE_ANON_KEY');
+                      setCopiedVarName('VITE_SUPABASE_ANON_KEY');
+                      setTimeout(() => setCopiedVarName(null), 2500);
+                    }}
+                    className="p-1.5 hover:bg-slate-800 rounded text-slate-400 hover:text-white transition-colors cursor-pointer"
+                    title="Copiar nome da variável"
+                  >
+                    {copiedVarName === 'VITE_SUPABASE_ANON_KEY' ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
+                  </button>
+                </div>
+              </div>
+
+              <div className="pt-1 flex items-center justify-between flex-wrap gap-2">
+                <span className="text-[11px] text-slate-400">
+                  Dica: Você também pode cadastrar como <code className="text-white font-mono">SUPABASE_URL</code> e <code className="text-white font-mono">SUPABASE_ANON_KEY</code>.
+                </span>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    setIsCheckingHealth(true);
+                    try {
+                      const res = await fetch('/api/config');
+                      if (res.ok) {
+                        const data = await res.json();
+                        if (data.isConfigured) {
+                          window.location.reload();
+                        } else {
+                          setSupabaseFeedback({
+                            type: 'error',
+                            message: 'A Vercel ainda não detectou as variáveis de ambiente. Verifique o painel da Vercel e faça um Redeploy se necessário.'
+                          });
+                        }
+                      }
+                    } catch {
+                      setSupabaseFeedback({
+                        type: 'error',
+                        message: 'Erro ao consultar endpoint da Vercel.'
+                      });
+                    } finally {
+                      setIsCheckingHealth(false);
+                    }
+                  }}
+                  className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-500 text-xs font-semibold text-white rounded-lg flex items-center gap-1.5 transition-colors cursor-pointer"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isCheckingHealth ? 'animate-spin' : ''}`} />
+                  <span>Verificar Configuração da Vercel Agora</span>
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Opção discreta de substituição manual neste navegador (apenas para testes) */}
+          <div className="pt-2">
+            <button
+              type="button"
+              onClick={() => setShowManualOverride(!showManualOverride)}
+              className="text-[11px] text-slate-400 hover:text-cyan-300 flex items-center gap-1.5 transition-colors cursor-pointer font-medium"
+            >
+              <span>{showManualOverride ? '▲ Ocultar substituição manual' : '▼ Deseja inserir ou alterar credenciais manualmente neste navegador?'}</span>
+            </button>
+
+            {showManualOverride && (
+              <div className="mt-3 p-4 bg-slate-900/80 border border-slate-800 rounded-xl space-y-3 animate-in fade-in">
+                <span className="text-xs font-semibold text-slate-300 block">
+                  Substituição Local (Salva apenas neste navegador atual):
+                </span>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+                  <div>
+                    <label className="block text-slate-400 mb-1">URL do Projeto Supabase:</label>
+                    <input
+                      type="url"
+                      value={inputUrl}
+                      onChange={(e) => setInputUrl(e.target.value)}
+                      placeholder="https://seu-projeto.supabase.co"
+                      className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white font-mono placeholder:text-slate-600 text-xs focus:outline-hidden focus:border-cyan-400"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-slate-400 mb-1">Chave Anônima Pública (Anon Key):</label>
+                    <input
+                      type="password"
+                      value={inputKey}
+                      onChange={(e) => setInputKey(e.target.value)}
+                      placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+                      className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white font-mono placeholder:text-slate-600 text-xs focus:outline-hidden focus:border-cyan-400"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCustomSupabaseConfig(inputUrl, inputKey);
+                      reinitializeSupabaseClient();
+                      const updated = getSupabaseConfig();
+                      setSupabaseCfg(updated);
+                      if (updated.isConfigured) {
+                        setSupabaseFeedback({
+                          type: 'success',
+                          message: 'Credenciais locais ativadas com sucesso!'
+                        });
+                        refreshHealth();
+                      } else {
+                        setSupabaseFeedback({
+                          type: 'error',
+                          message: 'Credenciais inválidas. Verifique a URL e a Chave.'
+                        });
+                      }
+                    }}
+                    className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-lg transition-colors flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <Check className="w-3.5 h-3.5" />
+                    <span>Salvar neste Navegador</span>
+                  </button>
+
+                  {(inputUrl || inputKey) && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setCustomSupabaseConfig('', '');
+                        reinitializeSupabaseClient();
+                        const updated = getSupabaseConfig();
+                        setSupabaseCfg(updated);
+                        setInputUrl('');
+                        setInputKey('');
+                        setSupabaseFeedback({
+                          type: 'success',
+                          message: 'Substituição manual removida. Usando configuração padrão da Vercel.'
+                        });
+                        refreshHealth();
+                      }}
+                      className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold rounded-lg transition-colors cursor-pointer"
+                    >
+                      Limpar Manual
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div className="pt-2 border-t border-slate-900 flex flex-wrap items-center justify-between gap-3">
+            <span className="text-xs font-semibold text-slate-400">
+              Operações de Sincronização em Massa:
+            </span>
 
             {/* BOTÕES DE GRAVAÇÃO NO SUPABASE */}
             <div className="flex flex-wrap items-center gap-2">

@@ -313,3 +313,18 @@ export async function loadPlatformsFromSupabase(): Promise<Platform[]> {
     return localList;
   }
 }
+
+/**
+ * Remove uma plataforma do Supabase
+ */
+export async function deletePlatformFromSupabase(platformIdOrSlug: string): Promise<boolean> {
+  if (!isSupabaseConfigured()) return false;
+  try {
+    const slug = platformIdOrSlug.toLowerCase();
+    await supabase.from('platforms').delete().or(`slug.eq.${slug},id.eq.${platformIdOrSlug}`);
+    return true;
+  } catch (err) {
+    console.warn('[Supabase] Erro ao deletar plataforma:', err);
+    return false;
+  }
+}

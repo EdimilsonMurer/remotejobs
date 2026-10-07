@@ -160,19 +160,30 @@ export const JobSearch: React.FC<JobSearchProps> = ({
 
   // Carrega vagas persistidas diretamente do Supabase PostgreSQL
   useEffect(() => {
-    loadJobsFromSupabase().then(({ jobs: dbJobs, fromSupabase, totalCount }) => {
-      if (fromSupabase && totalCount > 0) {
-        setIsSupabaseLive(true);
-        setJobsList(applyNewJobFlags(dbJobs));
-      } else if (fromSupabase && totalCount === 0) {
-        // Supabase conectado com 0 vagas: faz semeadura inicial automática
-        setIsSupabaseLive(true);
-        console.log('🌱 [Supabase] Semeando vagas iniciais no banco de dados...');
-        syncAllJobsToSupabase(initialBaseJobs).catch(() => {});
-      }
-    }).catch(err => {
-      console.warn('[Supabase Jobs] Usando cache local:', err);
-    });
+    const fetchJobs = () => {
+      loadJobsFromSupabase().then(({ jobs: dbJobs, fromSupabase, totalCount }) => {
+        if (fromSupabase && totalCount > 0) {
+          setIsSupabaseLive(true);
+          setJobsList(applyNewJobFlags(dbJobs));
+        } else if (fromSupabase && totalCount === 0) {
+          // Supabase conectado com 0 vagas: faz semeadura inicial automática
+          setIsSupabaseLive(true);
+          console.log('🌱 [Supabase] Semeando vagas iniciais no banco de dados...');
+          syncAllJobsToSupabase(initialBaseJobs).catch(() => {});
+        }
+      }).catch(err => {
+        console.warn('[Supabase Jobs] Usando cache local:', err);
+      });
+    };
+
+    fetchJobs();
+
+    const vercelHandler = () => {
+      fetchJobs();
+    };
+
+    window.addEventListener('supabase-configured-from-vercel', vercelHandler);
+    return () => window.removeEventListener('supabase-configured-from-vercel', vercelHandler);
   }, [initialBaseJobs]);
 
   // Atualização de sincronização
