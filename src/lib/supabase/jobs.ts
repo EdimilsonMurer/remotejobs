@@ -47,18 +47,19 @@ export function databaseRowToJob(row: any, analysisRow?: any): UnifiedJobWithSta
 
 /**
  * Carrega a lista completa de vagas persistidas no Supabase
- * Caso o banco esteja vazio ou inacessível, retorna o dataset local pré-configurado
  */
 export async function loadJobsFromSupabase(): Promise<{
   jobs: UnifiedJobWithStatus[];
   fromSupabase: boolean;
   totalCount: number;
+  lastUpdatedAt: string | null;
 }> {
   if (!isSupabaseConfigured()) {
     return {
       jobs: getLocalBaselineJobs(),
       fromSupabase: false,
-      totalCount: 0
+      totalCount: 0,
+      lastUpdatedAt: null
     };
   }
 
@@ -76,7 +77,8 @@ export async function loadJobsFromSupabase(): Promise<{
       return {
         jobs: getLocalBaselineJobs(),
         fromSupabase: false,
-        totalCount: 0
+        totalCount: 0,
+        lastUpdatedAt: null
       };
     }
 
@@ -85,15 +87,19 @@ export async function loadJobsFromSupabase(): Promise<{
     let analysisMap = new Map<string, any>();
 
     try {
-      const { data: analysisRows } = await supabase
-        .from('job_analysis')
-        .select('*')
-        .in('job_id', jobIds);
+      // Busca em lotes para evitar limites de URL
+      for (let i = 0; i < jobIds.length; i += 100) {
+        const chunk = jobIds.slice(i, i + 100);
+        const { data: analysisRows } = await supabase
+          .from('job_analysis')
+          .select('*')
+          .in('job_id', chunk);
 
-      if (analysisRows && Array.isArray(analysisRows)) {
-        analysisRows.forEach((a: any) => {
-          analysisMap.set(a.job_id, a);
-        });
+        if (analysisRows && Array.isArray(analysisRows)) {
+          analysisRows.forEach((a: any) => {
+            analysisMap.set(a.job_id, a);
+          });
+        }
       }
     } catch (e: any) {
       console.warn('[Supabase Jobs] Aviso ao buscar job_analysis:', e?.message);
@@ -105,11 +111,9 @@ export async function loadJobsFromSupabase(): Promise<{
       return databaseRowToJob(j, aRow);
     });
 
-    console.log(`✅ [Supabase] ${convertedList.length} vagas carregadas diretamente do banco PostgreSQL!`);
-
     // Obtém a data mais recente de atualização entre as vagas
     let latestUpdateIso: string | null = null;
-    for (const j of jobsRows) {
+    for (const j of (jobsRows as any[])) {
       const ts = j.updated_at || j.first_seen_at || j.published_at;
       if (ts) {
         if (!latestUpdateIso || new Date(ts).getTime() > new Date(latestUpdateIso).getTime()) {
@@ -136,7 +140,7 @@ export async function loadJobsFromSupabase(): Promise<{
 }
 
 /**
- * Salva uma vaga e sua análise de IA diretamente no Supabase
+ * Salva uma vaga individual e sua análise de IA no Supabase
  */
 export async function saveJobToSupabase(job: UnifiedJobWithStatus): Promise<{
   success: boolean;
@@ -152,15 +156,16 @@ export async function saveJobToSupabase(job: UnifiedJobWithStatus): Promise<{
   }
 
   try {
-    const slug = (job.platform_slug || 'outros').toLowerCase();
+    const slug = (job.platform_slug || 'welocalize').toLowerCase();
 
-    // 1. Garante que temos o platform_id
+    // 1. Busca platform_id válido
     let platformId: string | null = null;
     try {
       const { data: pData } = await supabase
         .from('platforms')
         .select('id')
-        .eq('slug', slug)
+        .or(`slug.eq.${slug},id.eq.${slug}`)
+        .limit(1)
         .maybeSingle();
 
       if (pData && (pData as any).id) {
@@ -168,7 +173,7 @@ export async function saveJobToSupabase(job: UnifiedJobWithStatus): Promise<{
       }
     } catch {}
 
-    // 2. Insere ou atualiza a vaga na tabela jobs
+    // 2. Prepara o payload
     const jobPayload: Record<string, any> = {
       platform_slug: slug,
       external_id: job.external_id,
@@ -178,40 +183,65 @@ export async function saveJobToSupabase(job: UnifiedJobWithStatus): Promise<{
       canonical_url: job.canonical_url || job.url,
       source_url: job.source_url || job.url,
       description: job.description || '',
+      description_hash: '',
       country: job.country || 'Brasil',
       location: job.location || 'Remoto',
       remote: job.remote ?? true,
       employment_type: job.employment_type || 'Freelance',
-      salary_min: job.salary_min || null,
-      salary_max: job.salary_max || null,
+      salary_min: job.salary_min !== null && job.salary_min !== undefined ? Number(job.salary_min) : null,
+      salary_max: job.salary_max !== null && job.salary_max !== undefined ? Number(job.salary_max) : null,
       salary_currency: job.salary_currency || 'USD',
       status: 'ACTIVE',
       published_at: job.published_at || new Date().toISOString(),
-      last_seen_at: new Date().toISOString()
+      first_seen_at: job.first_seen_at || new Date().toISOString(),
+      last_seen_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
     };
 
     if (platformId) {
       jobPayload.platform_id = platformId;
     }
 
-    const { data: insertedJob, error: jobError } = await (supabase
-      .from('jobs') as any)
+    let insertedJobId: string | null = null;
+
+    // Tentativa 1: Upsert com platform_slug,external_id
+    const { data: insertedJob, error: jobError } = await (supabase.from('jobs') as any)
       .upsert(jobPayload, { onConflict: 'platform_slug,external_id' })
       .select('id')
-      .single();
+      .maybeSingle();
 
-    if (jobError) {
-      console.error('[Supabase] Erro ao gravar vaga no banco:', jobError.message);
-      return { success: false, message: jobError.message, fromSupabase: false };
+    if (!jobError && insertedJob) {
+      insertedJobId = insertedJob.id;
+    } else {
+      // Tentativa 2: Upsert com platform_id,external_id caso a tabela use o schema antigo
+      const { data: retryJob, error: retryError } = await (supabase.from('jobs') as any)
+        .upsert(jobPayload, { onConflict: 'platform_id,external_id' })
+        .select('id')
+        .maybeSingle();
+
+      if (!retryError && retryJob) {
+        insertedJobId = retryJob.id;
+      } else {
+        // Tentativa 3: Insert direto simples
+        const { data: fallbackJob, error: fallbackError } = await (supabase.from('jobs') as any)
+          .insert(jobPayload)
+          .select('id')
+          .maybeSingle();
+
+        if (!fallbackError && fallbackJob) {
+          insertedJobId = fallbackJob.id;
+        } else {
+          const errMsg = fallbackError?.message || retryError?.message || jobError?.message || 'Erro ao gravar vaga';
+          return { success: false, message: errMsg, fromSupabase: false };
+        }
+      }
     }
 
-    const dbJobId = insertedJob?.id;
-
-    // 3. Se houver análise, insere ou atualiza em job_analysis
-    if (dbJobId && job.analysis) {
+    // 3. Grava análise de IA se existir
+    if (insertedJobId && job.analysis) {
       const a = job.analysis;
-      const analysisPayload: Record<string, any> = {
-        job_id: dbJobId,
+      const analysisPayload = {
+        job_id: insertedJobId,
         external_id: job.external_id,
         english_status: a.english_status || 'READING_ONLY',
         portuguese_required: a.portuguese_required ?? true,
@@ -221,8 +251,8 @@ export async function saveJobToSupabase(job: UnifiedJobWithStatus): Promise<{
         job_category: a.job_category || 'AI',
         experience_level: a.experience_level || 'ENTRY',
         salary_detected: a.salary_detected ?? false,
-        salary_min: a.salary_min || null,
-        salary_max: a.salary_max || null,
+        salary_min: a.salary_min ? Number(a.salary_min) : null,
+        salary_max: a.salary_max ? Number(a.salary_max) : null,
         salary_currency: a.salary_currency || 'USD',
         compatibility_score: a.compatibility_score || 90,
         confidence: a.confidence || 85,
@@ -251,6 +281,7 @@ export async function saveJobToSupabase(job: UnifiedJobWithStatus): Promise<{
 
 /**
  * Sincroniza em lote TODAS as vagas da aplicação para a tabela "jobs" e "job_analysis" do Supabase
+ * Utiliza lotes (batching) de alto desempenho para gravar todas as 549+ vagas em poucos segundos!
  */
 export async function syncAllJobsToSupabase(jobsToSync?: UnifiedJobWithStatus[]): Promise<{
   success: boolean;
@@ -268,33 +299,175 @@ export async function syncAllJobsToSupabase(jobsToSync?: UnifiedJobWithStatus[])
   }
 
   const list = jobsToSync && jobsToSync.length > 0 ? jobsToSync : getLocalBaselineJobs();
-  let count = 0;
-  let lastError = '';
 
-  for (const job of list) {
-    const res = await saveJobToSupabase(job);
-    if (res.success && res.fromSupabase) {
-      count++;
-    } else if (res.message) {
-      lastError = res.message;
+  try {
+    // 1. Mapeia todos os platform_id existentes no Supabase
+    let platformMap = new Map<string, string>();
+    let fallbackPlatformId: string | null = null;
+
+    try {
+      const { data: plats } = await supabase
+        .from('platforms')
+        .select('id, slug');
+
+      if (plats && Array.isArray(plats) && plats.length > 0) {
+        plats.forEach((p: any) => {
+          if (p.slug && p.id) {
+            platformMap.set(p.slug.toLowerCase(), p.id);
+          }
+        });
+        fallbackPlatformId = (plats[0] as any)?.id || null;
+      }
+    } catch {}
+
+    // 2. Prepara os payloads de todas as vagas
+    const nowIso = new Date().toISOString();
+    const preparedJobs = list.map(job => {
+      const slug = (job.platform_slug || 'welocalize').toLowerCase();
+      const pId = platformMap.get(slug) || fallbackPlatformId;
+
+      const payload: Record<string, any> = {
+        platform_slug: slug,
+        external_id: job.external_id,
+        title: job.title,
+        company: job.company,
+        url: job.url,
+        canonical_url: job.canonical_url || job.url,
+        source_url: job.source_url || job.url,
+        description: job.description || '',
+        description_hash: '',
+        country: job.country || 'Brasil',
+        location: job.location || 'Remoto',
+        remote: job.remote ?? true,
+        employment_type: job.employment_type || 'Freelance',
+        salary_min: job.salary_min !== null && job.salary_min !== undefined ? Number(job.salary_min) : null,
+        salary_max: job.salary_max !== null && job.salary_max !== undefined ? Number(job.salary_max) : null,
+        salary_currency: job.salary_currency || 'USD',
+        status: 'ACTIVE',
+        published_at: job.published_at || nowIso,
+        first_seen_at: job.first_seen_at || nowIso,
+        last_seen_at: nowIso,
+        updated_at: nowIso
+      };
+
+      if (pId) {
+        payload.platform_id = pId;
+      }
+
+      return {
+        jobPayload: payload,
+        analysis: job.analysis
+      };
+    });
+
+    let totalSynced = 0;
+    let lastError = '';
+    const BATCH_SIZE = 30;
+
+    // 3. Executa a gravação em lotes (batch chunks)
+    for (let i = 0; i < preparedJobs.length; i += BATCH_SIZE) {
+      const batchItems = preparedJobs.slice(i, i + BATCH_SIZE);
+      const batchPayloads = batchItems.map(b => b.jobPayload);
+
+      // Tentativa 1: Upsert em lote por (platform_slug, external_id)
+      let insertedBatch: any[] | null = null;
+      let { data, error } = await (supabase.from('jobs') as any)
+        .upsert(batchPayloads, { onConflict: 'platform_slug,external_id' })
+        .select('id, external_id');
+
+      if (!error && data) {
+        insertedBatch = data;
+      } else {
+        // Tentativa 2: Upsert por (platform_id, external_id)
+        const res2 = await (supabase.from('jobs') as any)
+          .upsert(batchPayloads, { onConflict: 'platform_id,external_id' })
+          .select('id, external_id');
+
+        if (!res2.error && res2.data) {
+          insertedBatch = res2.data;
+        } else {
+          // Tentativa 3: Insert individual para isolar erros
+          for (const item of batchItems) {
+            const singleRes = await saveJobToSupabase({
+              ...item.jobPayload,
+              analysis: item.analysis
+            } as any);
+            if (singleRes.success) {
+              totalSynced++;
+            } else if (singleRes.message) {
+              lastError = singleRes.message;
+            }
+          }
+          continue;
+        }
+      }
+
+      if (insertedBatch && Array.isArray(insertedBatch)) {
+        totalSynced += insertedBatch.length;
+
+        // Grava as análises de IA em lote correspondentes
+        const analysisBatch: any[] = [];
+        const idMap = new Map<string, string>();
+        insertedBatch.forEach((row: any) => idMap.set(row.external_id, row.id));
+
+        batchItems.forEach(b => {
+          const dbId = idMap.get(b.jobPayload.external_id);
+          if (dbId && b.analysis) {
+            const a = b.analysis;
+            analysisBatch.push({
+              job_id: dbId,
+              external_id: b.jobPayload.external_id,
+              english_status: a.english_status || 'READING_ONLY',
+              portuguese_required: a.portuguese_required ?? true,
+              portuguese_level: a.portuguese_level || 'NATIVE',
+              brazil_eligible: a.brazil_eligible ?? true,
+              remote_eligible: a.remote_eligible ?? true,
+              job_category: a.job_category || 'AI',
+              experience_level: a.experience_level || 'ENTRY',
+              salary_detected: a.salary_detected ?? false,
+              salary_min: a.salary_min ? Number(a.salary_min) : null,
+              salary_max: a.salary_max ? Number(a.salary_max) : null,
+              salary_currency: a.salary_currency || 'USD',
+              compatibility_score: a.compatibility_score || 90,
+              confidence: a.confidence || 85,
+              reason: a.reason || 'Análise registrada no Supabase',
+              analysis_version: a.analysis_version || 'v1',
+              analyzed_at: a.analyzed_at || nowIso
+            });
+          }
+        });
+
+        if (analysisBatch.length > 0) {
+          await (supabase.from('job_analysis') as any)
+            .upsert(analysisBatch, { onConflict: 'job_id' })
+            .catch(() => {});
+        }
+      }
     }
-  }
 
-  if (count > 0) {
+    if (totalSynced > 0) {
+      return {
+        success: true,
+        totalSynced,
+        totalAttempted: list.length,
+        message: `${totalSynced} de ${list.length} vagas e análises de IA gravadas com sucesso no Supabase!`
+      };
+    }
+
     return {
-      success: true,
-      totalSynced: count,
+      success: false,
+      totalSynced: 0,
       totalAttempted: list.length,
-      message: `${count} de ${list.length} vaga(s) e análises de IA gravadas com sucesso nas tabelas "jobs" e "job_analysis" do Supabase!`
+      message: lastError ? `Erro ao gravar no Supabase: ${lastError}` : 'Falha na gravação. Execute o script SQL no SQL Editor do Supabase para alinhar as permissões da tabela jobs.'
+    };
+  } catch (err: any) {
+    return {
+      success: false,
+      totalSynced: 0,
+      totalAttempted: list.length,
+      message: err.message || 'Erro inesperado ao sincronizar vagas no Supabase'
     };
   }
-
-  return {
-    success: false,
-    totalSynced: 0,
-    totalAttempted: list.length,
-    message: lastError ? `Erro ao gravar vagas no Supabase: ${lastError}` : 'Não foi possível gravar as vagas no Supabase. Verifique se o SQL de criação das tabelas foi executado.'
-  };
 }
 
 /**

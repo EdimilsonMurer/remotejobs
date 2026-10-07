@@ -1,32 +1,12 @@
 -- ============================================================================
--- REMOTEHUNTER PRO / REMOTEJOBS PT - SCHEMA UNIFICADO E COMPLETO DO SUPABASE
+-- REMOTEHUNTER PRO / REMOTEJOBS PT - SCHEMA UNIFICADO E DEFINITIVO DO SUPABASE
 -- Execute este script no SQL Editor do seu projeto Supabase:
 -- Painel Supabase > SQL Editor > New Query > Colar este código > Run
 -- ============================================================================
 
--- 1. HABILITAR EXTENSÃO UUID
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
--- 2. TIPOS ENUMERADOS (com verificação defensiva)
-DO $$ BEGIN
-    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'platform_status') THEN
-        CREATE TYPE platform_status AS ENUM ('HEALTHY', 'WARNING', 'ERROR', 'DISABLED');
-    END IF;
-    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'job_status') THEN
-        CREATE TYPE job_status AS ENUM ('ACTIVE', 'EXPIRED', 'CLOSED', 'UNKNOWN');
-    END IF;
-    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'english_status_type') THEN
-        CREATE TYPE english_status_type AS ENUM ('NONE', 'DESIRABLE', 'PARTIAL', 'REQUIRED', 'UNKNOWN');
-    END IF;
-    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'portuguese_level_type') THEN
-        CREATE TYPE portuguese_level_type AS ENUM ('NATIVE', 'FLUENT', 'INTERMEDIATE', 'BASIC', 'NONE', 'UNKNOWN');
-    END IF;
-    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'data_quality_type') THEN
-        CREATE TYPE data_quality_type AS ENUM ('HIGH', 'MEDIUM', 'LOW');
-    END IF;
-END $$;
-
--- 3. TABELA DE PLATAFORMAS (platforms)
+-- 1. TABELA DE PLATAFORMAS (platforms)
 CREATE TABLE IF NOT EXISTS platforms (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     name VARCHAR(150) NOT NULL UNIQUE,
@@ -51,7 +31,7 @@ CREATE TABLE IF NOT EXISTS platforms (
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Garante que todas as colunas existem mesmo se a tabela já foi criada anteriormente
+-- Ajustes idempotentes para garantir colunas em caso de tabelas já existentes
 ALTER TABLE platforms 
   ADD COLUMN IF NOT EXISTS notes TEXT DEFAULT '',
   ADD COLUMN IF NOT EXISTS user_status VARCHAR(50) DEFAULT 'NOT_REGISTERED',
@@ -65,7 +45,7 @@ ALTER TABLE platforms
   ADD COLUMN IF NOT EXISTS enabled BOOLEAN DEFAULT true,
   ADD COLUMN IF NOT EXISTS status VARCHAR(50) DEFAULT 'HEALTHY';
 
--- 4. TABELA DE VAGAS (jobs)
+-- 2. TABELA DE VAGAS (jobs)
 CREATE TABLE IF NOT EXISTS jobs (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     platform_id UUID REFERENCES platforms(id) ON DELETE CASCADE,
@@ -76,8 +56,8 @@ CREATE TABLE IF NOT EXISTS jobs (
     url TEXT NOT NULL,
     canonical_url TEXT,
     source_url TEXT NOT NULL,
-    description TEXT NOT NULL,
-    description_hash VARCHAR(64) NOT NULL DEFAULT '',
+    description TEXT NOT NULL DEFAULT '',
+    description_hash VARCHAR(64) DEFAULT '',
     country VARCHAR(100) DEFAULT 'Brasil',
     location VARCHAR(200) DEFAULT 'Remoto',
     remote BOOLEAN DEFAULT true,
@@ -96,6 +76,7 @@ CREATE TABLE IF NOT EXISTS jobs (
     CONSTRAINT uq_platform_slug_external_id UNIQUE (platform_slug, external_id)
 );
 
+-- Correções e flexibilizações caso a tabela jobs já existisse com constraints restritivas
 ALTER TABLE jobs 
   ADD COLUMN IF NOT EXISTS platform_slug VARCHAR(150),
   ADD COLUMN IF NOT EXISTS description_hash VARCHAR(64) DEFAULT '',
@@ -108,7 +89,24 @@ ALTER TABLE jobs
   ADD COLUMN IF NOT EXISTS salary_currency VARCHAR(10) DEFAULT 'USD',
   ADD COLUMN IF NOT EXISTS status VARCHAR(30) DEFAULT 'ACTIVE';
 
--- 5. TABELA DE ANÁLISE DE IA DAS VAGAS (job_analysis)
+ALTER TABLE jobs ALTER COLUMN platform_id DROP NOT NULL;
+ALTER TABLE jobs ALTER COLUMN description_hash DROP NOT NULL;
+ALTER TABLE jobs ALTER COLUMN description_hash SET DEFAULT '';
+ALTER TABLE jobs ALTER COLUMN description DROP NOT NULL;
+ALTER TABLE jobs ALTER COLUMN description SET DEFAULT '';
+
+-- Garante constraint única por (platform_slug, external_id)
+DO $$
+BEGIN
+    ALTER TABLE jobs DROP CONSTRAINT IF EXISTS uq_platform_external_id;
+    ALTER TABLE jobs DROP CONSTRAINT IF EXISTS uq_platform_slug_external_id;
+    ALTER TABLE jobs DROP CONSTRAINT IF EXISTS jobs_platform_slug_external_id_key;
+    ALTER TABLE jobs ADD CONSTRAINT uq_platform_slug_external_id UNIQUE (platform_slug, external_id);
+EXCEPTION
+    WHEN OTHERS THEN NULL;
+END $$;
+
+-- 3. TABELA DE ANÁLISE DE IA DAS VAGAS (job_analysis)
 CREATE TABLE IF NOT EXISTS job_analysis (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     job_id UUID NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
@@ -133,7 +131,7 @@ CREATE TABLE IF NOT EXISTS job_analysis (
     CONSTRAINT uq_job_analysis_job_id UNIQUE (job_id)
 );
 
--- 6. TABELA DE CANDIDATURAS & ACOMPANHAMENTO (job_applications)
+-- 4. TABELA DE CANDIDATURAS & ACOMPANHAMENTO (job_applications)
 CREATE TABLE IF NOT EXISTS job_applications (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     platform_slug VARCHAR(150) NOT NULL,
@@ -146,7 +144,7 @@ CREATE TABLE IF NOT EXISTS job_applications (
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 7. TABELA DE PALAVRAS BLOQUEADAS (blocked_keywords)
+-- 5. TABELA DE PALAVRAS BLOQUEADAS (blocked_keywords)
 CREATE TABLE IF NOT EXISTS blocked_keywords (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     term VARCHAR(100) NOT NULL UNIQUE,
@@ -154,7 +152,7 @@ CREATE TABLE IF NOT EXISTS blocked_keywords (
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 8. TABELA DE LOGS DE COLETA (source_logs)
+-- 6. TABELA DE LOGS DE COLETA (source_logs)
 CREATE TABLE IF NOT EXISTS source_logs (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     platform_slug VARCHAR(150) NOT NULL,
@@ -168,7 +166,7 @@ CREATE TABLE IF NOT EXISTS source_logs (
     error_message TEXT
 );
 
--- 9. ÍNDICES DE PERFORMANCE
+-- 7. ÍNDICES DE PERFORMANCE
 CREATE INDEX IF NOT EXISTS idx_platforms_slug ON platforms(slug);
 CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status);
 CREATE INDEX IF NOT EXISTS idx_jobs_platform_slug ON jobs(platform_slug);
@@ -176,8 +174,7 @@ CREATE INDEX IF NOT EXISTS idx_jobs_published_at ON jobs(published_at DESC);
 CREATE INDEX IF NOT EXISTS idx_job_analysis_job_id ON job_analysis(job_id);
 CREATE INDEX IF NOT EXISTS idx_job_analysis_score ON job_analysis(compatibility_score DESC);
 
--- 10. POLÍTICAS DE ROW LEVEL SECURITY (RLS)
--- Garante acesso de LEITURA e ESCRITA pública para a aplicação Web (chave anon)
+-- 8. POLÍTICAS DE ROW LEVEL SECURITY (RLS) - Permite leitura e escrita
 ALTER TABLE platforms ENABLE ROW LEVEL SECURITY;
 ALTER TABLE jobs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE job_analysis ENABLE ROW LEVEL SECURITY;
@@ -203,7 +200,7 @@ CREATE POLICY "Public access blocked_keywords" ON blocked_keywords FOR ALL USING
 DROP POLICY IF EXISTS "Public access source_logs" ON source_logs;
 CREATE POLICY "Public access source_logs" ON source_logs FOR ALL USING (true) WITH CHECK (true);
 
--- 11. SEED INICIAL DAS 13 PLATAFORMAS OFICIAIS
+-- 9. SEED DAS 13 PLATAFORMAS OFICIAIS
 INSERT INTO platforms (name, slug, website_url, jobs_url, connector_type, category, currency, english_requirement, process_type, average_pay_rate, payment_methods, notes, status, enabled)
 VALUES
     ('Welocalize', 'welocalize', 'https://www.welocalize.com', 'https://www.welocalize.com/careers/', 'LEVER_API', 'Treinamento de IA & Avaliação', 'USD', 'READING_ONLY', 'ONLINE_EXAM', '$5.00 - $8.50 / hora', '{"Hyperwallet","Wire Transfer"}', 'Excelente para brasileiros. Testes teóricos de guidelines com consulta permitida. Sem chamadas orais.', 'HEALTHY', true),
@@ -232,33 +229,5 @@ ON CONFLICT (slug) DO UPDATE SET
     notes = EXCLUDED.notes,
     updated_at = NOW();
 
--- 12. SEED INICIAL DE PALAVRAS PROIBIDAS
-INSERT INTO blocked_keywords (term, category) VALUES
-    ('italiano', 'IDIOMA_ESTRANGEIRO'),
-    ('italian', 'IDIOMA_ESTRANGEIRO'),
-    ('inglês', 'IDIOMA_ESTRANGEIRO'),
-    ('ingles', 'IDIOMA_ESTRANGEIRO'),
-    ('english', 'IDIOMA_ESTRANGEIRO'),
-    ('bilíngue', 'IDIOMA_ESTRANGEIRO'),
-    ('bilingue', 'IDIOMA_ESTRANGEIRO'),
-    ('bilingual', 'IDIOMA_ESTRANGEIRO'),
-    ('espanhol', 'IDIOMA_ESTRANGEIRO'),
-    ('spanish', 'IDIOMA_ESTRANGEIRO'),
-    ('alemão', 'IDIOMA_ESTRANGEIRO'),
-    ('alemao', 'IDIOMA_ESTRANGEIRO'),
-    ('german', 'IDIOMA_ESTRANGEIRO'),
-    ('francês', 'IDIOMA_ESTRANGEIRO'),
-    ('frances', 'IDIOMA_ESTRANGEIRO'),
-    ('french', 'IDIOMA_ESTRANGEIRO'),
-    ('japonês', 'IDIOMA_ESTRANGEIRO'),
-    ('japones', 'IDIOMA_ESTRANGEIRO'),
-    ('japanese', 'IDIOMA_ESTRANGEIRO'),
-    ('mandarim', 'IDIOMA_ESTRANGEIRO'),
-    ('mandarin', 'IDIOMA_ESTRANGEIRO'),
-    ('chinês', 'IDIOMA_ESTRANGEIRO'),
-    ('chines', 'IDIOMA_ESTRANGEIRO'),
-    ('chinese', 'IDIOMA_ESTRANGEIRO')
-ON CONFLICT (term) DO NOTHING;
-
--- 13. RECARREGA CACHE DO SCHEMA POSTGREST
+-- 10. RECARREGA CACHE DO SCHEMA POSTGREST
 NOTIFY pgrst, 'reload schema';

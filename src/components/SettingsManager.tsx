@@ -1117,8 +1117,8 @@ CREATE TABLE IF NOT EXISTS jobs (
     url TEXT NOT NULL,
     canonical_url TEXT,
     source_url TEXT NOT NULL,
-    description TEXT NOT NULL,
-    description_hash VARCHAR(64) NOT NULL DEFAULT '',
+    description TEXT NOT NULL DEFAULT '',
+    description_hash VARCHAR(64) DEFAULT '',
     country VARCHAR(100) DEFAULT 'Brasil',
     location VARCHAR(200) DEFAULT 'Remoto',
     remote BOOLEAN DEFAULT true,
@@ -1148,6 +1148,22 @@ ALTER TABLE jobs
   ADD COLUMN IF NOT EXISTS salary_max NUMERIC(12, 2),
   ADD COLUMN IF NOT EXISTS salary_currency VARCHAR(10) DEFAULT 'USD',
   ADD COLUMN IF NOT EXISTS status VARCHAR(30) DEFAULT 'ACTIVE';
+
+ALTER TABLE jobs ALTER COLUMN platform_id DROP NOT NULL;
+ALTER TABLE jobs ALTER COLUMN description_hash DROP NOT NULL;
+ALTER TABLE jobs ALTER COLUMN description_hash SET DEFAULT '';
+ALTER TABLE jobs ALTER COLUMN description DROP NOT NULL;
+ALTER TABLE jobs ALTER COLUMN description SET DEFAULT '';
+
+DO $$
+BEGIN
+    ALTER TABLE jobs DROP CONSTRAINT IF EXISTS uq_platform_external_id;
+    ALTER TABLE jobs DROP CONSTRAINT IF EXISTS uq_platform_slug_external_id;
+    ALTER TABLE jobs DROP CONSTRAINT IF EXISTS jobs_platform_slug_external_id_key;
+    ALTER TABLE jobs ADD CONSTRAINT uq_platform_slug_external_id UNIQUE (platform_slug, external_id);
+EXCEPTION
+    WHEN OTHERS THEN NULL;
+END $$;
 
 -- 3. TABELA DE ANÁLISE DE IA (job_analysis)
 CREATE TABLE IF NOT EXISTS job_analysis (
