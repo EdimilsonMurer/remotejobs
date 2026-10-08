@@ -1,13 +1,11 @@
 import { supabase, isSupabaseConfigured } from './client';
 import { UnifiedJobWithStatus } from '../../services/jobsSyncService';
-import { CURATED_JOBS } from '../../data/curatedJobs';
 import LIVE_JOBS_RAW from '../../data/liveCuratedJobs.json';
 import { syncAllPlatformsToSupabase } from './platforms';
 import { loadBlockedKeywordsFromSupabase } from '../../services/blockedKeywordsService';
 import { seedInitialApplicationsToSupabase } from './applications';
 import { seedInitialSourceLogsToSupabase } from './sourceLogs';
 import { seedInitialJobHistoryToSupabase } from './history';
-import { ConnectorRegistry } from '../../connectors/registry';
 
 /**
  * Gera um hash determinístico de 64 caracteres hexadecimais (compatível com VARCHAR(64) NOT NULL)
@@ -803,7 +801,7 @@ export async function recordDatabaseSyncLog(platformSlug: string = 'all-platform
 }
 
 /**
- * Coleta e persiste imediatamente as vagas de uma plataforma recém-cadastrada ou selecionada (ex: Mercor)
+ * Sincroniza e consulta as vagas de uma plataforma recém-cadastrada ou selecionada
  */
 export async function harvestJobsForPlatform(platform: any): Promise<{
   success: boolean;
@@ -811,45 +809,39 @@ export async function harvestJobsForPlatform(platform: any): Promise<{
   message: string;
 }> {
   try {
-    const registry = ConnectorRegistry.getInstance();
-    registry.registerPlatform(platform);
     const slug = (platform.id || platform.name).toLowerCase().replace(/[^a-z0-9]/g, '-').replace(/-+/g, '-');
-    const connector = registry.getConnector(slug);
+    
+    // Dispara coleta e análise no backend
+    try {
+      await fetch('/api/jobs/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ platform: slug, platforms: [platform] })
+      });
+    } catch {}
 
-    if (!connector) {
-      return { success: false, jobs: [], message: `Conector não encontrado para ${platform.name}` };
-    }
-
-    const collected = await connector.collect();
-    const unified: UnifiedJobWithStatus[] = collected.map(j => ({
-      ...j,
-      is_new: true,
-      first_seen_at: new Date().toISOString()
-    }));
-
-    // Persiste todas as vagas no Supabase
-    if (isSupabaseConfigured() && unified.length > 0) {
-      for (const job of unified) {
-        await saveJobToSupabase(job).catch(() => {});
-      }
-      await recordDatabaseSyncLog(slug, unified.length);
-    }
+    // Consulta vagas gravadas no Supabase para a plataforma
+    const { jobs: allJobs } = await loadJobsFromSupabase();
+    const platformJobs = allJobs.filter(j => 
+      (j.platform_slug || '').toLowerCase() === slug ||
+      (j.platform_slug || '').toLowerCase() === (platform.slug || '').toLowerCase()
+    );
 
     // Notifica a interface do usuário para atualização imediata
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('platform-jobs-harvested', {
-        detail: { platform: platform.name, jobs: unified }
+        detail: { platform: platform.name, jobs: platformJobs }
       }));
     }
 
     return {
       success: true,
-      jobs: unified,
-      message: `${unified.length} vagas coletadas com sucesso para ${platform.name}`
+      jobs: platformJobs,
+      message: `${platformJobs.length} vagas consolidadas com sucesso para ${platform.name}`
     };
   } catch (err: any) {
-    console.warn(`[Harvest] Erro ao coletar vagas para ${platform?.name}:`, err);
-    return { success: false, jobs: [], message: err?.message || 'Erro ao coletar vagas' };
+    console.warn(`[Harvest] Erro ao sincronizar vagas para ${platform?.name}:`, err);
+    return { success: false, jobs: [], message: err?.message || 'Erro ao sincronizar vagas' };
   }
 }
 

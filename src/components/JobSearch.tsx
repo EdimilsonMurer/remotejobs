@@ -31,7 +31,6 @@ import { NormalizedJob } from '../connectors/base/types';
 import { JobOpportunity, Platform, JobAnalysis } from '../types/job';
 import { JobDetailModal } from './JobDetailModal';
 import { PlatformMonitorModal } from './PlatformMonitorModal';
-import { ConnectorRegistry } from '../connectors/registry';
 import LIVE_JOBS_RAW from '../data/liveCuratedJobs.json';
 import { 
   UnifiedJobWithStatus, 
@@ -293,17 +292,39 @@ export const JobSearch: React.FC<JobSearchProps> = ({
     return jobsList.filter(j => j.is_hidden).length;
   }, [jobsList]);
 
-  // Varredura de plataforma individual via Sistema de Monitoramento
+  // Varredura de plataforma individual disparando coleta no backend e consultando dados prontos no Supabase
   const handleScanSinglePlatform = async (platform: Platform) => {
     try {
-      const res = await harvestJobsForPlatform(platform);
-      if (res.success && res.jobs.length > 0) {
-        const result = processDatabaseUpdate(jobsList, res.jobs);
+      setSyncFeedback({
+        type: 'info',
+        message: `Iniciando varredura e análise para ${platform.name}...`,
+        newCount: 0
+      });
+
+      // Dispara ciclo no backend para coletar, normalizar, analisar e gravar no Supabase
+      try {
+        await fetch('/api/jobs/sync', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ platform: platform.id || (platform as any).slug, platforms: [platform] })
+        });
+      } catch (err) {
+        console.warn('[Scan Single Backend]', err);
+      }
+
+      // Consulta os dados consolidados e prontos no Supabase
+      const { jobs: freshSupabaseJobs } = await loadJobsFromSupabase();
+      if (freshSupabaseJobs && freshSupabaseJobs.length > 0) {
+        const result = processDatabaseUpdate(jobsList, freshSupabaseJobs);
         setJobsList(result.updatedJobs);
+        const countForPlatform = freshSupabaseJobs.filter(j => 
+          (j.platform_slug || '').toLowerCase() === (platform.id || (platform as any).slug || '').toLowerCase()
+        ).length;
+
         setSyncFeedback({
           type: 'success',
-          message: `${res.jobs.length} vaga(s) da plataforma ${platform.name} verificadas e registradas com sucesso!`,
-          newCount: res.jobs.length
+          message: `${countForPlatform} vaga(s) da plataforma ${platform.name} verificadas e consolidadas no banco de dados!`,
+          newCount: countForPlatform
         });
       } else {
         setSyncFeedback({
@@ -318,81 +339,27 @@ export const JobSearch: React.FC<JobSearchProps> = ({
     }
   };
 
-  // Sincroniza e atualiza o banco de dados
+  // Sincroniza e atualiza o banco de dados via backend -> Supabase -> frontend
   const handleSyncDatabase = async () => {
     setIsSyncingDatabase(true);
     setSyncFeedback(null);
 
     try {
-      let incomingJobs: UnifiedJobWithStatus[] = [];
-
-      // 1. Tenta carregar dados mais recentes do Supabase PostgreSQL
+      // 1. Dispara o ciclo de coletores, normalização, pré-filtro e Gemini no backend
       try {
-        const { jobs: supabaseJobs, fromSupabase, totalCount } = await loadJobsFromSupabase();
-        if (fromSupabase && totalCount > 0) {
-          setIsSupabaseLive(true);
-          incomingJobs = [...supabaseJobs];
-        }
-      } catch (e: any) {
-        console.warn('[Sync] Falha ao consultar Supabase:', e?.message);
-      }
-
-      // 2. Tenta buscar novidades em tempo real dos coletores oficiais passando todas as plataformas cadastradas
-      try {
-        const response = await fetch('/api/jobs/sync', {
+        await fetch('/api/jobs/sync', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ platforms })
         });
-
-        if (response.ok) {
-          const data = await response.json();
-          if (Array.isArray(data.jobs) && data.jobs.length > 0) {
-            const freshlyCollected: UnifiedJobWithStatus[] = data.jobs
-              .filter((item: any) => !isFabricatedJob(item))
-              .map((item: any) => ({
-                ...item,
-                analysis: item.analysis || undefined
-              }));
-
-            // Persiste no Supabase caso configurado
-            if (isSupabaseConfigured()) {
-              for (const j of freshlyCollected) {
-                saveJobToSupabase(j).catch(() => {});
-              }
-            }
-
-            incomingJobs = [...freshlyCollected, ...incomingJobs];
-          }
-        }
       } catch (err) {
-        console.warn('[Sync] Falha ao consultar endpoint remoto, mesclando base:', err);
+        console.warn('[Sync Backend Request]', err);
       }
 
-      // 3. Resiliência do cliente: executa coletores registrados no cliente (incluindo Mercor, Welocalize, Turing, etc.)
-      try {
-        const registry = ConnectorRegistry.getInstance();
-        const connectors = registry.getAllConnectors(platforms);
-        for (const connector of connectors) {
-          try {
-            const cJobs = await connector.collect();
-            if (cJobs && cJobs.length > 0) {
-              const mapped: UnifiedJobWithStatus[] = cJobs.map(cj => ({
-                ...cj,
-                is_new: true,
-                first_seen_at: new Date().toISOString()
-              }));
-              if (isSupabaseConfigured()) {
-                for (const mj of mapped) {
-                  saveJobToSupabase(mj).catch(() => {});
-                }
-              }
-              incomingJobs = [...mapped, ...incomingJobs];
-            }
-          } catch {}
-        }
-      } catch (err) {
-        console.warn('[Sync Client Registry]', err);
+      // 2. O frontend consulta exclusivamente os dados prontos gravados no Supabase
+      const { jobs: supabaseJobs, fromSupabase, totalCount } = await loadJobsFromSupabase();
+      if (fromSupabase && totalCount > 0) {
+        setIsSupabaseLive(true);
       }
 
       const nowIso = new Date().toISOString();
@@ -401,12 +368,9 @@ export const JobSearch: React.FC<JobSearchProps> = ({
       saveSyncState(st);
       setLastSyncFormatted(formatSyncDateTime(nowIso));
 
-      // Grava log oficial no Supabase source_logs para que qualquer refresh mantenha esta data
-      await recordDatabaseSyncLog('all-sync', incomingJobs.length);
-
-      if (incomingJobs.length > 0) {
-        // Processa a atualização identificando o que é estritamente novo
-        const result = processDatabaseUpdate(jobsList, incomingJobs);
+      if (supabaseJobs.length > 0) {
+        // Atualiza a visualização com base nas novas vagas identificadas
+        const result = processDatabaseUpdate(jobsList, supabaseJobs);
         setJobsList(result.updatedJobs);
 
         if (result.newJobsCount > 0) {
@@ -419,7 +383,7 @@ export const JobSearch: React.FC<JobSearchProps> = ({
           setSyncFeedback({
             type: 'info',
             message: isSupabaseConfigured() 
-              ? 'Banco de dados Supabase verificado. Todas as plataformas e vagas estão sincronizadas e atualizadas!' 
+              ? 'Banco de dados Supabase verificado. Todas as vagas estão sincronizadas e prontas!' 
               : 'Base de dados verificada com sucesso.',
             newCount: 0
           });
@@ -427,7 +391,7 @@ export const JobSearch: React.FC<JobSearchProps> = ({
       } else {
         setSyncFeedback({
           type: 'info',
-          message: 'Banco de dados verificado com sucesso. Nenhuma nova vaga no momento.',
+          message: 'Banco de dados verificado com sucesso. Nenhuma vaga encontrada no momento.',
           newCount: 0
         });
       }

@@ -115,6 +115,47 @@ export class PipelineWorker {
       } catch {}
     }
 
+    // Carrega snapshot existente no DeduplicationEngine (do Supabase ou do cache)
+    const existingSnapshots: any[] = [];
+    if (supabaseClient) {
+      try {
+        const { data: dbJobs } = await supabaseClient
+          .from('jobs')
+          .select('id, platform_slug, external_id, canonical_url, url, description_hash, company, title, location');
+        if (dbJobs && Array.isArray(dbJobs)) {
+          for (const row of dbJobs) {
+            existingSnapshots.push({
+              id: row.id,
+              platform_slug: row.platform_slug,
+              external_id: row.external_id,
+              normalized_url: row.canonical_url || row.url || '',
+              description_hash: row.description_hash || '',
+              title_company_location_key: DeduplicationEngine.generateTitleKey(row.company, row.title, row.location)
+            });
+          }
+        }
+      } catch (err: any) {
+        console.warn('[Worker] Erro ao carregar vagas existentes do Supabase:', err?.message);
+      }
+    }
+
+    // Complementa com o cache local
+    for (const c of cachedJobs) {
+      if (!existingSnapshots.some(s => s.platform_slug === c.platform_slug && s.external_id === c.external_id)) {
+        existingSnapshots.push({
+          id: c.external_id,
+          platform_slug: c.platform_slug,
+          external_id: c.external_id,
+          normalized_url: c.canonical_url || c.url || '',
+          description_hash: c.description_hash || '',
+          title_company_location_key: DeduplicationEngine.generateTitleKey(c.company, c.title, c.location)
+        });
+      }
+    }
+
+    this.deduplicator.loadExistingJobs(existingSnapshots);
+    console.log(`[Worker] Deduplicador inicializado com ${existingSnapshots.length} registros existentes.`);
+
     const seenIdsInThisCycle = new Set<string>();
 
     for (const connector of connectors) {
@@ -134,15 +175,23 @@ export class PipelineWorker {
         jobsFound = rawJobs.length;
 
         for (const job of rawJobs) {
-          seenIdsInThisCycle.add(job.external_id);
           const decision = this.deduplicator.evaluate(job);
 
           if (decision.action === 'UPDATE_LAST_SEEN') {
+            seenIdsInThisCycle.add(job.external_id);
             jobsUpdated++;
             // Atualiza last_seen no cache
             const existing = cachedJobs.find(c => c.external_id === job.external_id);
             if (existing) {
               existing.last_seen_at = new Date().toISOString();
+              existing.status = 'ACTIVE';
+            }
+            if (supabaseClient && decision.matched_job_id) {
+              await supabaseClient
+                .from('jobs')
+                .update({ last_seen_at: new Date().toISOString(), status: 'ACTIVE' })
+                .eq('id', decision.matched_job_id)
+                .catch(() => {});
             }
             continue;
           }
@@ -153,46 +202,108 @@ export class PipelineWorker {
           }
 
           const preFilter = runPreFilter(job);
-          if (!preFilter.shouldSendToGemini) {
+          if (preFilter.priority === 'DISCARD') {
             jobsDiscarded++;
             continue;
           }
 
           jobsNew++;
 
-          // Apenas vagas prioritárias recebem análise com limite de quota por ciclo
-          if (preFilter.priority === 'HIGH' && jobsAnalyzed < 3) {
-            console.log(`   [Worker] Analisando: "${job.title.substring(0, 40)}..."`);
+          // Analisa a vaga sem teto arbitrário: se couber no Gemini classifica por IA, caso contrário fallback heurístico calibrado
+          let analysis;
+          try {
+            if (preFilter.shouldSendToGemini) {
+              analysis = await this.classifier.classifyJob(job);
+            } else {
+              analysis = this.classifier.classifyJobHeuristic(job);
+            }
+          } catch (classErr: any) {
+            console.warn(`   [Worker] Fallback para heurística em ${job.title}: ${classErr.message}`);
+            analysis = this.classifier.classifyJobHeuristic(job);
+          }
+
+          jobsAnalyzed++;
+          seenIdsInThisCycle.add(job.external_id);
+
+          const jobWithAnalysis = {
+            ...job,
+            analysis,
+            status: 'ACTIVE',
+            last_seen_at: new Date().toISOString()
+          };
+
+          // Atualiza cache em memória
+          const idx = cachedJobs.findIndex(c => c.external_id === job.external_id);
+          if (idx >= 0) {
+            cachedJobs[idx] = jobWithAnalysis;
+          } else {
+            cachedJobs.unshift(jobWithAnalysis);
+          }
+
+          // Persiste no Supabase caso configurado
+          if (supabaseClient) {
             try {
-              const analysis = await this.classifier.classifyJob(job);
-              jobsAnalyzed++;
+              const { data: pData } = await supabaseClient
+                .from('platforms')
+                .select('id')
+                .eq('slug', connector.slug)
+                .maybeSingle();
 
-              const jobWithAnalysis = {
-                ...job,
-                analysis,
+              const platformId = pData ? pData.id : null;
+              const jobPayload: Record<string, any> = {
+                platform_slug: connector.slug,
+                external_id: job.external_id,
+                title: job.title,
+                company: job.company,
+                url: job.url,
+                canonical_url: job.canonical_url || job.url,
+                source_url: job.source_url || job.url,
+                description: job.description || '',
+                country: job.country || 'Brasil',
+                location: job.location || 'Remoto',
+                remote: job.remote ?? true,
+                employment_type: job.employment_type || 'Freelance',
+                salary_min: job.salary_min || null,
+                salary_max: job.salary_max || null,
+                salary_currency: job.salary_currency || 'USD',
                 status: 'ACTIVE',
                 last_seen_at: new Date().toISOString()
               };
+              if (platformId) jobPayload.platform_id = platformId;
 
-              // Atualiza cache em memória
-              const idx = cachedJobs.findIndex(c => c.external_id === job.external_id);
-              if (idx >= 0) {
-                cachedJobs[idx] = jobWithAnalysis;
-              } else {
-                cachedJobs.unshift(jobWithAnalysis);
+              const { data: insJob } = await supabaseClient
+                .from('jobs')
+                .upsert(jobPayload, { onConflict: 'platform_slug,external_id' })
+                .select('id')
+                .maybeSingle();
+
+              if (insJob?.id) {
+                let engStatus = (analysis.english_status as string) || 'NONE';
+                if (engStatus === 'READING_ONLY') engStatus = 'PARTIAL';
+
+                await supabaseClient.from('job_analysis').upsert({
+                  job_id: insJob.id,
+                  external_id: job.external_id,
+                  english_status: engStatus,
+                  portuguese_required: analysis.portuguese_required,
+                  portuguese_level: analysis.portuguese_level,
+                  brazil_eligible: analysis.brazil_eligible,
+                  remote_eligible: analysis.remote_eligible,
+                  job_category: analysis.job_category,
+                  experience_level: analysis.experience_level,
+                  salary_detected: analysis.salary_detected,
+                  salary_min: analysis.salary_min,
+                  salary_max: analysis.salary_max,
+                  salary_currency: analysis.salary_currency,
+                  compatibility_score: analysis.compatibility_score,
+                  confidence: analysis.confidence,
+                  reason: analysis.reason,
+                  analysis_version: analysis.analysis_version || 'v2-heuristic',
+                  analyzed_at: new Date().toISOString()
+                }, { onConflict: 'job_id' });
               }
-            } catch (classErr: any) {
-              console.warn(`   [Worker] Fallback para heurística em ${job.title}: ${classErr.message}`);
-              const fallbackAnalysis = this.classifier.classifyJobHeuristic(job);
-              const jobWithAnalysis = {
-                ...job,
-                analysis: fallbackAnalysis,
-                status: 'ACTIVE',
-                last_seen_at: new Date().toISOString()
-              };
-              const idx = cachedJobs.findIndex(c => c.external_id === job.external_id);
-              if (idx >= 0) cachedJobs[idx] = jobWithAnalysis;
-              else cachedJobs.unshift(jobWithAnalysis);
+            } catch (dbErr: any) {
+              console.warn(`[Worker] Erro ao persistir ${job.title} no Supabase:`, dbErr.message);
             }
           }
         }
