@@ -7,6 +7,7 @@ import { loadBlockedKeywordsFromSupabase } from '../../services/blockedKeywordsS
 import { seedInitialApplicationsToSupabase } from './applications';
 import { seedInitialSourceLogsToSupabase } from './sourceLogs';
 import { seedInitialJobHistoryToSupabase } from './history';
+import { ConnectorRegistry } from '../../connectors/registry';
 
 /**
  * Gera um hash determinístico de 64 caracteres hexadecimais (compatível com VARCHAR(64) NOT NULL)
@@ -203,6 +204,36 @@ export async function loadJobsFromSupabase(): Promise<{
           latestUpdateIso = ts;
         }
       }
+    }
+
+    // Consulta os logs oficiais de sincronização na tabela source_logs do Supabase
+    try {
+      const { data: latestLogs } = await supabase
+        .from('source_logs')
+        .select('finished_at, started_at, created_at')
+        .order('finished_at', { ascending: false })
+        .limit(3);
+
+      if (latestLogs && Array.isArray(latestLogs) && latestLogs.length > 0) {
+        for (const log of (latestLogs as any[])) {
+          const logTs = log.finished_at || log.started_at || log.created_at;
+          if (logTs && (!latestUpdateIso || new Date(logTs).getTime() > new Date(latestUpdateIso).getTime())) {
+            latestUpdateIso = logTs;
+          }
+        }
+      }
+    } catch (e: any) {
+      console.warn('[Supabase Jobs] Aviso ao checar source_logs:', e?.message);
+    }
+
+    // Checa também o timestamp armazenado localmente para nunca regredir a data de sincronização
+    if (typeof window !== 'undefined') {
+      try {
+        const localSync = localStorage.getItem('remotehunter_last_sync_timestamp_v2');
+        if (localSync && (!latestUpdateIso || new Date(localSync).getTime() > new Date(latestUpdateIso).getTime())) {
+          latestUpdateIso = localSync;
+        }
+      } catch {}
     }
 
     return {
@@ -758,3 +789,83 @@ export function getLocalBaselineJobs(): UnifiedJobWithStatus[] {
 
   return combined;
 }
+
+/**
+ * Registra o log oficial de sincronização na tabela source_logs do Supabase e atualiza o localStorage
+ */
+export async function recordDatabaseSyncLog(platformSlug: string = 'all-platforms', jobsFound: number = 0): Promise<string> {
+  const nowIso = new Date().toISOString();
+  if (typeof window !== 'undefined') {
+    try {
+      localStorage.setItem('remotehunter_last_sync_timestamp_v2', nowIso);
+    } catch {}
+  }
+
+  if (isSupabaseConfigured()) {
+    try {
+      await (supabase as any).from('source_logs').insert({
+        platform_slug: platformSlug,
+        status: 'SUCCESS',
+        jobs_found: jobsFound,
+        started_at: nowIso,
+        finished_at: nowIso
+      });
+    } catch (e: any) {
+      console.warn('[Supabase Sync Log] Aviso ao registrar log:', e?.message);
+    }
+  }
+
+  return nowIso;
+}
+
+/**
+ * Coleta e persiste imediatamente as vagas de uma plataforma recém-cadastrada ou selecionada (ex: Mercor)
+ */
+export async function harvestJobsForPlatform(platform: any): Promise<{
+  success: boolean;
+  jobs: UnifiedJobWithStatus[];
+  message: string;
+}> {
+  try {
+    const registry = ConnectorRegistry.getInstance();
+    registry.registerPlatform(platform);
+    const slug = (platform.id || platform.name).toLowerCase().replace(/[^a-z0-9]/g, '-').replace(/-+/g, '-');
+    const connector = registry.getConnector(slug);
+
+    if (!connector) {
+      return { success: false, jobs: [], message: `Conector não encontrado para ${platform.name}` };
+    }
+
+    const collected = await connector.collect();
+    const unified: UnifiedJobWithStatus[] = collected.map(j => ({
+      ...j,
+      is_new: true,
+      first_seen_at: new Date().toISOString()
+    }));
+
+    // Persiste todas as vagas no Supabase
+    if (isSupabaseConfigured() && unified.length > 0) {
+      for (const job of unified) {
+        await saveJobToSupabase(job).catch(() => {});
+      }
+      await recordDatabaseSyncLog(slug, unified.length);
+    }
+
+    // Notifica a interface do usuário para atualização imediata
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('platform-jobs-harvested', {
+        detail: { platform: platform.name, jobs: unified }
+      }));
+    }
+
+    return {
+      success: true,
+      jobs: unified,
+      message: `${unified.length} vagas coletadas com sucesso para ${platform.name}`
+    };
+  } catch (err: any) {
+    console.warn(`[Harvest] Erro ao coletar vagas para ${platform?.name}:`, err);
+    return { success: false, jobs: [], message: err?.message || 'Erro ao coletar vagas' };
+  }
+}
+

@@ -16,6 +16,19 @@ export interface KnownPlatformData {
 }
 
 export const KNOWN_PLATFORMS_DB: Record<string, KnownPlatformData> = {
+  'mercor.com': {
+    name: 'Mercor AI',
+    websiteUrl: 'https://mercor.com/',
+    careersUrl: 'https://work.mercor.com/explore',
+    category: 'Treinamento de IA, Avaliação de LLMs & Engenharia de Prompts',
+    currency: 'USD',
+    englishRequirement: 'READING_ONLY',
+    processType: 'ONLINE_EXAM',
+    status: 'FAVORITE',
+    paymentMethods: ['Deel', 'Transferência Bancária Internacional'],
+    averagePayRate: '$20.00 - $45.00 / hora',
+    notes: 'Plataforma líder global de inteligência artificial com projetos de alta remuneração em Dólar. Vagas ativas para especialistas brasileiros em avaliação de IA e revisão em Português do Brasil sem entrevista síncrona em inglês.'
+  },
   'alignerr.com': {
     name: 'Alignerr',
     websiteUrl: 'https://www.alignerr.com/',

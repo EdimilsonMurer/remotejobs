@@ -2,6 +2,7 @@ import { SourceConnector } from './base/source-connector';
 import { WelocalizeConnector } from './welocalize';
 import { TuringConnector } from './turing';
 import { OutlierConnector } from './outlier';
+import { MercorConnector } from './mercor';
 import { GenericDynamicConnector } from './generic';
 import { INITIAL_PLATFORMS } from '../data/initialPlatforms';
 
@@ -10,52 +11,77 @@ export class ConnectorRegistry {
   private connectors: Map<string, SourceConnector> = new Map();
 
   private constructor() {
-    // 1. Registra conectores especializados
+    // 1. Registra conectores especializados oficiais
     this.register(new WelocalizeConnector());
     this.register(new TuringConnector());
     this.register(new OutlierConnector());
+    this.register(new MercorConnector());
 
-    // 2. Registra dinamicamente conectores genéricos/específicos para TODAS as plataformas cadastradas (incluindo Mercor, Alignerr, Clickworker, etc.)
+    // 2. Registra dinamicamente conectores para a base inicial e local
     this.loadAndRegisterAllPlatforms();
   }
 
-  private loadAndRegisterAllPlatforms() {
-    let list = INITIAL_PLATFORMS;
+  public registerPlatform(p: { id: string; name: string; websiteUrl?: string; careersUrl?: string; category?: string; currency?: string; averagePayRate?: string }) {
+    const slug = (p.id || p.name).toLowerCase().replace(/[^a-z0-9]/g, '-').replace(/-+/g, '-');
+    const url = (p.careersUrl || p.websiteUrl || '').toLowerCase();
+
+    // Se for Mercor, assegura o conector dedicado da Mercor
+    if (slug === 'mercor' || url.includes('mercor.com')) {
+      if (!this.connectors.has('mercor')) {
+        this.register(new MercorConnector());
+      }
+      this.connectors.set(slug, this.connectors.get('mercor')!);
+      return;
+    }
+
+    if (!this.connectors.has(slug)) {
+      this.register(new GenericDynamicConnector({
+        name: p.name,
+        slug: slug,
+        websiteUrl: p.websiteUrl || 'https://',
+        jobsUrl: p.careersUrl || p.websiteUrl || 'https://',
+        category: p.category,
+        currency: p.currency,
+        averagePayRate: p.averagePayRate
+      }));
+    }
+  }
+
+  public registerPlatforms(platforms: any[]) {
+    if (!Array.isArray(platforms)) return;
+    for (const p of platforms) {
+      if (p && (p.id || p.name)) {
+        this.registerPlatform(p);
+      }
+    }
+  }
+
+  private loadAndRegisterAllPlatforms(extraPlatforms?: any[]) {
+    let list: any[] = [...INITIAL_PLATFORMS];
+    if (Array.isArray(extraPlatforms)) {
+      list = [...list, ...extraPlatforms];
+    }
+
     try {
       if (typeof window !== 'undefined') {
-        const saved = localStorage.getItem('remotehunter_platforms_v1');
+        const saved = localStorage.getItem('remotehunter_platforms_v1') || localStorage.getItem('remotehunter_platforms_v2');
         if (saved) {
           const parsed = JSON.parse(saved);
           if (Array.isArray(parsed) && parsed.length > 0) {
-            list = parsed;
+            list = [...list, ...parsed];
           }
         }
       }
     } catch {}
 
     for (const p of list) {
-      const slug = p.id.toLowerCase().replace(/[^a-z0-9]/g, '-');
-      // Se ainda não tiver conector dedicado, cria um conector dinâmico
-      if (!this.connectors.has(slug)) {
-        this.register(new GenericDynamicConnector({
-          name: p.name,
-          slug: slug,
-          websiteUrl: p.websiteUrl,
-          jobsUrl: p.careersUrl || p.websiteUrl,
-          category: p.category,
-          currency: p.currency,
-          averagePayRate: p.averagePayRate
-        }));
-      }
+      this.registerPlatform(p);
     }
   }
 
   public static getInstance(): ConnectorRegistry {
     if (!ConnectorRegistry.instance) {
       ConnectorRegistry.instance = new ConnectorRegistry();
-    } else {
-      // Atualiza dinamicamente caso novas plataformas tenham sido adicionadas
-      ConnectorRegistry.instance.loadAndRegisterAllPlatforms();
     }
     return ConnectorRegistry.instance;
   }
@@ -68,8 +94,10 @@ export class ConnectorRegistry {
     return this.connectors.get(slug);
   }
 
-  public getAllConnectors(): SourceConnector[] {
-    this.loadAndRegisterAllPlatforms();
+  public getAllConnectors(extraPlatforms?: any[]): SourceConnector[] {
+    if (extraPlatforms) {
+      this.registerPlatforms(extraPlatforms);
+    }
     return Array.from(this.connectors.values());
   }
 }

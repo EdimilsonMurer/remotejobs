@@ -194,6 +194,18 @@ export default async function handler(req: any, res: any) {
       }
     }
 
+    if (supabaseClient) {
+      try {
+        await (supabaseClient as any).from('source_logs').insert({
+          platform_slug: 'all-cron',
+          status: 'SUCCESS',
+          jobs_found: totalFound,
+          started_at: new Date(startTime).toISOString(),
+          finished_at: new Date().toISOString()
+        });
+      } catch {}
+    }
+
     return res.status(200).json({
       success: true,
       message: 'Ciclo de coleta concluído com sucesso!',

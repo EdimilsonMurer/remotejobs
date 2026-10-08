@@ -2,6 +2,21 @@ import { Platform, BlacklistRule } from '../types/job';
 
 export const INITIAL_PLATFORMS: Platform[] = [
   {
+    id: 'mercor',
+    name: 'Mercor AI',
+    websiteUrl: 'https://mercor.com/',
+    careersUrl: 'https://work.mercor.com/explore',
+    category: 'Treinamento de IA & Avaliação de LLMs',
+    currency: 'USD',
+    englishRequirement: 'READING_ONLY',
+    processType: 'ONLINE_EXAM',
+    status: 'FAVORITE',
+    paymentMethods: ['Deel', 'Conta Bancária'],
+    notes: 'Plataforma líder em IA pagando em Dólar ($20 - $45/h). Vagas em Português do Brasil para avaliação de modelos e prompt engineering sem entrevista em inglês.',
+    averagePayRate: '$20.00 - $45.00 / hora',
+    userStatus: 'NOT_REGISTERED'
+  },
+  {
     id: 'alignerr',
     name: 'Alignerr',
     websiteUrl: 'https://www.alignerr.com/',

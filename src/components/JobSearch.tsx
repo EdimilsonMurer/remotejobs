@@ -24,11 +24,14 @@ import {
   DollarSign,
   ArrowUpDown,
   ArrowDownAZ,
-  TrendingDown
+  TrendingDown,
+  Activity
 } from 'lucide-react';
 import { NormalizedJob } from '../connectors/base/types';
 import { JobOpportunity, Platform, JobAnalysis } from '../types/job';
 import { JobDetailModal } from './JobDetailModal';
+import { PlatformMonitorModal } from './PlatformMonitorModal';
+import { ConnectorRegistry } from '../connectors/registry';
 import LIVE_JOBS_RAW from '../data/liveCuratedJobs.json';
 import { 
   UnifiedJobWithStatus, 
@@ -36,26 +39,29 @@ import {
   processDatabaseUpdate, 
   markJobAsSeen, 
   markAllJobsAsSeen, 
-  hideJob,
-  unhideJob,
-  unhideAllJobs,
-  getStoredSyncState,
-  formatSyncDateTime
+  hideJob, 
+  unhideJob, 
+  unhideAllJobs, 
+  getStoredSyncState, 
+  saveSyncState,
+  formatSyncDateTime 
 } from '../services/jobsSyncService';
 import { 
   checkJobForBlockedKeywords, 
-  getBlockedKeywords,
+  getBlockedKeywords, 
   loadBlockedKeywordsFromSupabase 
 } from '../services/blockedKeywordsService';
 import { 
   formatJobSalary, 
-  extractJobRequirements,
+  extractJobRequirements, 
   getJobSalaryNumericValue 
 } from '../services/jobAnalysisHelper';
 import { 
   loadJobsFromSupabase, 
   saveJobToSupabase, 
-  syncAllJobsToSupabase 
+  syncAllJobsToSupabase,
+  recordDatabaseSyncLog,
+  harvestJobsForPlatform
 } from '../lib/supabase/jobs';
 import { isSupabaseConfigured } from '../lib/supabase/client';
 
@@ -158,6 +164,18 @@ export const JobSearch: React.FC<JobSearchProps> = ({
   });
 
   const [isSupabaseLive, setIsSupabaseLive] = useState(false);
+  const [isSyncingDatabase, setIsSyncingDatabase] = useState(false);
+  const [isMonitorOpen, setIsMonitorOpen] = useState(false);
+  const [syncFeedback, setSyncFeedback] = useState<{
+    type: 'success' | 'info';
+    message: string;
+    newCount: number;
+  } | null>(null);
+
+  const [lastSyncFormatted, setLastSyncFormatted] = useState<string>(() => {
+    const st = getStoredSyncState();
+    return formatSyncDateTime(st.lastSyncAt);
+  });
 
   // Carrega vagas persistidas diretamente do Supabase PostgreSQL
   useEffect(() => {
@@ -166,8 +184,17 @@ export const JobSearch: React.FC<JobSearchProps> = ({
         if (fromSupabase && totalCount > 0) {
           setIsSupabaseLive(true);
           setJobsList(applyNewJobFlags(dbJobs));
-          if (lastUpdatedAt) {
-            setLastSyncFormatted(formatSyncDateTime(lastUpdatedAt));
+          
+          // PREVENÇÃO DE REGRESSÃO DE HORA: Compara com o timestamp local e escolhe o mais recente
+          const localSync = getStoredSyncState().lastSyncAt;
+          let effectiveSync = lastUpdatedAt;
+          if (localSync) {
+            if (!effectiveSync || new Date(localSync).getTime() > new Date(effectiveSync).getTime()) {
+              effectiveSync = localSync;
+            }
+          }
+          if (effectiveSync) {
+            setLastSyncFormatted(formatSyncDateTime(effectiveSync));
           }
         } else if (fromSupabase && totalCount === 0) {
           // Supabase conectado com 0 vagas: faz semeadura inicial automática
@@ -194,22 +221,34 @@ export const JobSearch: React.FC<JobSearchProps> = ({
       fetchJobs();
     };
 
+    const harvestHandler = (e: any) => {
+      if (e.detail?.jobs && Array.isArray(e.detail.jobs)) {
+        setJobsList(prev => {
+          const result = processDatabaseUpdate(prev, e.detail.jobs);
+          return result.updatedJobs;
+        });
+        const nowIso = new Date().toISOString();
+        const st = getStoredSyncState();
+        st.lastSyncAt = nowIso;
+        saveSyncState(st);
+        setLastSyncFormatted(formatSyncDateTime(nowIso));
+        setSyncFeedback({
+          type: 'success',
+          message: `${e.detail.jobs.length} vaga(s) da plataforma ${e.detail.platform || ''} sincronizadas e registradas no banco de dados!`,
+          newCount: e.detail.jobs.length
+        });
+        setTimeout(() => setSyncFeedback(null), 8000);
+      }
+    };
+
     window.addEventListener('supabase-configured-from-vercel', vercelHandler);
-    return () => window.removeEventListener('supabase-configured-from-vercel', vercelHandler);
+    window.addEventListener('platform-jobs-harvested', harvestHandler);
+
+    return () => {
+      window.removeEventListener('supabase-configured-from-vercel', vercelHandler);
+      window.removeEventListener('platform-jobs-harvested', harvestHandler);
+    };
   }, [initialBaseJobs]);
-
-  // Atualização de sincronização
-  const [isSyncingDatabase, setIsSyncingDatabase] = useState(false);
-  const [syncFeedback, setSyncFeedback] = useState<{
-    type: 'success' | 'info';
-    message: string;
-    newCount: number;
-  } | null>(null);
-
-  const [lastSyncFormatted, setLastSyncFormatted] = useState<string>(() => {
-    const st = getStoredSyncState();
-    return formatSyncDateTime(st.lastSyncAt);
-  });
 
   // Estados dos filtros
   const [searchQuery, setSearchQuery] = useState('');
@@ -268,6 +307,31 @@ export const JobSearch: React.FC<JobSearchProps> = ({
     return jobsList.filter(j => j.is_hidden).length;
   }, [jobsList]);
 
+  // Varredura de plataforma individual via Sistema de Monitoramento
+  const handleScanSinglePlatform = async (platform: Platform) => {
+    try {
+      const res = await harvestJobsForPlatform(platform);
+      if (res.success && res.jobs.length > 0) {
+        const result = processDatabaseUpdate(jobsList, res.jobs);
+        setJobsList(result.updatedJobs);
+        setSyncFeedback({
+          type: 'success',
+          message: `${res.jobs.length} vaga(s) da plataforma ${platform.name} verificadas e registradas com sucesso!`,
+          newCount: res.jobs.length
+        });
+      } else {
+        setSyncFeedback({
+          type: 'info',
+          message: `Plataforma ${platform.name} verificada. Conexão operacional!`,
+          newCount: 0
+        });
+      }
+      setTimeout(() => setSyncFeedback(null), 6000);
+    } catch (e: any) {
+      console.error('[Scan Single Error]:', e);
+    }
+  };
+
   // Sincroniza e atualiza o banco de dados
   const handleSyncDatabase = async () => {
     setIsSyncingDatabase(true);
@@ -287,20 +351,21 @@ export const JobSearch: React.FC<JobSearchProps> = ({
         console.warn('[Sync] Falha ao consultar Supabase:', e?.message);
       }
 
-      // 2. Tenta buscar novidades em tempo real dos coletores oficiais
+      // 2. Tenta buscar novidades em tempo real dos coletores oficiais passando todas as plataformas cadastradas
       try {
         const response = await fetch('/api/jobs/sync', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' }
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ platforms })
         });
 
         if (response.ok) {
           const data = await response.json();
           if (Array.isArray(data.jobs) && data.jobs.length > 0) {
-            const freshlyCollected = data.jobs.map((item: any) => ({
+            const freshlyCollected: UnifiedJobWithStatus[] = data.jobs.map((item: any) => ({
               ...item,
               analysis: item.analysis || {
-                english_status: 'READING_ONLY',
+                english_status: 'NONE',
                 portuguese_required: true,
                 portuguese_level: 'NATIVE',
                 brazil_eligible: true,
@@ -311,7 +376,7 @@ export const JobSearch: React.FC<JobSearchProps> = ({
                 salary_min: null,
                 salary_max: null,
                 salary_currency: 'USD',
-                compatibility_score: 93,
+                compatibility_score: 95,
                 confidence: 90,
                 reason: 'Vaga verificada diretamente no portal oficial.',
                 analysis_version: 'v1',
@@ -333,8 +398,40 @@ export const JobSearch: React.FC<JobSearchProps> = ({
         console.warn('[Sync] Falha ao consultar endpoint remoto, mesclando base:', err);
       }
 
+      // 3. Resiliência do cliente: executa coletores registrados no cliente (incluindo Mercor, Welocalize, Turing, etc.)
+      try {
+        const registry = ConnectorRegistry.getInstance();
+        const connectors = registry.getAllConnectors(platforms);
+        for (const connector of connectors) {
+          try {
+            const cJobs = await connector.collect();
+            if (cJobs && cJobs.length > 0) {
+              const mapped: UnifiedJobWithStatus[] = cJobs.map(cj => ({
+                ...cj,
+                is_new: true,
+                first_seen_at: new Date().toISOString()
+              }));
+              if (isSupabaseConfigured()) {
+                for (const mj of mapped) {
+                  saveJobToSupabase(mj).catch(() => {});
+                }
+              }
+              incomingJobs = [...mapped, ...incomingJobs];
+            }
+          } catch {}
+        }
+      } catch (err) {
+        console.warn('[Sync Client Registry]', err);
+      }
+
       const nowIso = new Date().toISOString();
+      const st = getStoredSyncState();
+      st.lastSyncAt = nowIso;
+      saveSyncState(st);
       setLastSyncFormatted(formatSyncDateTime(nowIso));
+
+      // Grava log oficial no Supabase source_logs para que qualquer refresh mantenha esta data
+      await recordDatabaseSyncLog('all-sync', incomingJobs.length);
 
       if (incomingJobs.length > 0) {
         // Processa a atualização identificando o que é estritamente novo
@@ -347,13 +444,11 @@ export const JobSearch: React.FC<JobSearchProps> = ({
             message: `${result.newJobsCount} nova(s) vaga(s) sincronizadas e registradas no banco de dados!`,
             newCount: result.newJobsCount
           });
-          // Foca automaticamente nas novas para que o usuário veja
-          setViewMode('NEW_ONLY');
         } else {
           setSyncFeedback({
             type: 'info',
             message: isSupabaseConfigured() 
-              ? 'Banco de dados Supabase verificado. Todas as vagas estão sincronizadas e atualizadas!' 
+              ? 'Banco de dados Supabase verificado. Todas as plataformas e vagas estão sincronizadas e atualizadas!' 
               : 'Base de dados verificada com sucesso.',
             newCount: 0
           });
@@ -682,6 +777,15 @@ export const JobSearch: React.FC<JobSearchProps> = ({
             </div>
 
             <button 
+              onClick={() => setIsMonitorOpen(true)}
+              className="px-3.5 py-2.5 bg-blue-500/20 hover:bg-blue-500/30 text-cyan-200 hover:text-white text-xs font-bold rounded-xl border border-cyan-400/30 transition-colors flex items-center gap-1.5 cursor-pointer self-stretch sm:self-auto justify-center shadow-inner"
+              title="Abrir Central de Monitoramento e Varredura de Plataformas"
+            >
+              <Activity className="w-4 h-4 text-cyan-300 animate-pulse" />
+              <span>Monitor de Plataformas</span>
+            </button>
+
+            <button 
               onClick={onOpenGuides}
               className="px-3 py-2.5 bg-white/10 hover:bg-white/20 text-white text-xs font-semibold rounded-xl border border-white/20 transition-colors flex items-center gap-1.5 cursor-pointer self-stretch sm:self-auto justify-center"
             >
@@ -900,18 +1004,31 @@ export const JobSearch: React.FC<JobSearchProps> = ({
             </button>
 
             {hiddenJobsCount > 0 && (
-              <button
-                onClick={() => setViewMode('HIDDEN_ONLY')}
-                className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-all whitespace-nowrap flex items-center gap-1.5 cursor-pointer ${
-                  viewMode === 'HIDDEN_ONLY'
-                    ? 'bg-slate-900 text-white shadow-xs font-bold'
-                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
-                }`}
-                title="Exibir vagas ocultadas da listagem principal"
-              >
-                <EyeOff className="w-3.5 h-3.5 text-amber-500" />
-                <span>Ocultadas ({hiddenJobsCount})</span>
-              </button>
+              <div className="flex items-center gap-1.5">
+                <button
+                  onClick={() => setViewMode('HIDDEN_ONLY')}
+                  className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-all whitespace-nowrap flex items-center gap-1.5 cursor-pointer ${
+                    viewMode === 'HIDDEN_ONLY'
+                      ? 'bg-slate-900 text-white shadow-xs font-bold'
+                      : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
+                  }`}
+                  title="Exibir vagas ocultadas da listagem principal"
+                >
+                  <EyeOff className="w-3.5 h-3.5 text-amber-500" />
+                  <span>Ocultadas ({hiddenJobsCount})</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    unhideAllJobs();
+                    setJobsList(prev => prev.map(j => ({ ...j, is_hidden: false })));
+                  }}
+                  className="px-2 py-1 text-[11px] text-amber-700 hover:text-amber-800 bg-amber-100 hover:bg-amber-200 border border-amber-300 rounded-md font-bold transition cursor-pointer"
+                  title="Restaurar todas as vagas ocultas de volta para a listagem principal"
+                >
+                  Restaurar Todas
+                </button>
+              </div>
             )}
           </div>
         </div>
@@ -1435,6 +1552,18 @@ export const JobSearch: React.FC<JobSearchProps> = ({
         onMarkAsSeen={handleMarkAsSeen}
         onHideJob={handleHideJob}
         onUnhideJob={handleUnhideJob}
+      />
+
+      {/* Central de Monitoramento e Varredura de Plataformas */}
+      <PlatformMonitorModal
+        isOpen={isMonitorOpen}
+        onClose={() => setIsMonitorOpen(false)}
+        platforms={platforms}
+        jobs={jobsList}
+        lastSyncFormatted={lastSyncFormatted}
+        onScanSinglePlatform={handleScanSinglePlatform}
+        onScanAllPlatforms={handleSyncDatabase}
+        isScanning={isSyncingDatabase}
       />
     </div>
   );

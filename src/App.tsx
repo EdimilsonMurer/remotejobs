@@ -12,7 +12,7 @@ import { Platform, BlacklistRule, JobOpportunity } from './types/job';
 import { INITIAL_PLATFORMS, INITIAL_BLACKLIST_RULES } from './data/initialPlatforms';
 import { CURATED_JOBS } from './data/curatedJobs';
 import { loadPlatformsFromSupabase, savePlatformToSupabase, deletePlatformFromSupabase } from './lib/supabase/platforms';
-import { saveJobToSupabase } from './lib/supabase/jobs';
+import { saveJobToSupabase, harvestJobsForPlatform } from './lib/supabase/jobs';
 
 const STORAGE_KEY_PLATFORMS = 'remotehunter_platforms_v1';
 const STORAGE_KEY_RULES = 'remotehunter_blacklist_rules_v1';
@@ -228,6 +228,13 @@ export default function App() {
     savePlatformToSupabase(savedPlatform).catch(err => {
       console.warn('[Supabase] Erro ao sincronizar plataforma:', err);
     });
+
+    // Se a plataforma não estiver na lista negra, faz varredura imediata de vagas
+    if (savedPlatform.status !== 'BLACKLIST') {
+      harvestJobsForPlatform(savedPlatform).catch(err => {
+        console.warn('[Harvest Platform Jobs] Erro ao coletar vagas da nova plataforma:', err);
+      });
+    }
 
     // If marked as Blacklist, ensure there's a rule for it too
     if (savedPlatform.status === 'BLACKLIST') {

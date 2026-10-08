@@ -249,28 +249,41 @@ ANALISE A PLATFORMA E RETORNE EXATAMENTE O OBJETO JSON com as seguintes regras:
   // Rota de sincronização do banco de dados de vagas
   app.post('/api/jobs/sync', async (req, res) => {
     try {
-      const welocalize = new WelocalizeConnector();
-      const turing = new TuringConnector();
+      const registry = ConnectorRegistry.getInstance();
+      const connectors = registry.getAllConnectors(req.body?.platforms);
       
-      const [wRaw, tRaw] = await Promise.all([
-        welocalize.getJobs().catch(e => {
-          console.warn('[Sync API] Welocalize fetch error:', e?.message);
-          return [];
-        }),
-        turing.getJobs().catch(e => {
-          console.warn('[Sync API] Turing fetch error:', e?.message);
-          return [];
-        })
-      ]);
+      let allJobs: any[] = [];
+      const sourceSummary: any[] = [];
 
-      const wNorm = wRaw.map(j => welocalize.normalizeJob(j));
-      const tNorm = tRaw.map(j => turing.normalizeJob(j));
-      const combined = [...wNorm, ...tNorm];
+      for (const connector of connectors) {
+        const startTime = Date.now();
+        try {
+          const jobs = await connector.collect();
+          allJobs = [...allJobs, ...jobs];
+          sourceSummary.push({
+            platform: connector.name,
+            slug: connector.slug,
+            jobs_found: jobs.length,
+            duration_ms: Date.now() - startTime,
+            status: 'SUCCESS'
+          });
+        } catch (err: any) {
+          sourceSummary.push({
+            platform: connector.name,
+            slug: connector.slug,
+            jobs_found: 0,
+            error: err.message,
+            status: 'FAILED'
+          });
+        }
+      }
 
       return res.json({
         success: true,
-        jobs: combined,
-        total: combined.length,
+        jobs: allJobs,
+        total: allJobs.length,
+        platforms_scanned: sourceSummary.length,
+        sources: sourceSummary,
         timestamp: new Date().toISOString()
       });
     } catch (e: any) {
