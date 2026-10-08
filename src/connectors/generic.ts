@@ -49,47 +49,20 @@ export class GenericDynamicConnector extends SourceConnector {
             title: title,
             company: this.name,
             url: this.jobsUrl,
-            description: `Vaga oficial coletada dinamicamente no portal da ${this.name} (${this.jobsUrl}). Função voltada para especialistas remotos com pagamento em ${this.customCurrency}.`,
+            description: `Vaga oficial coletada no portal de carreiras da ${this.name} (${this.jobsUrl}).`,
             location: 'Remoto (Brasil / Global)',
             country: 'Brasil',
             published_at: new Date().toISOString(),
-            salary_min: 15,
-            salary_max: 35,
+            salary_min: null,
+            salary_max: null,
             salary_currency: this.customCurrency
           }));
         }
       }
     } catch {}
 
-    // 2. Fallback inteligente de alta qualidade para plataformas recém-adicionadas (ex: Mercor, Alignerr, etc.)
-    return [
-      {
-        id: `${this.slug}-dynamic-1`,
-        title: `${this.name} - AI Trainer & Prompt Engineer (Remoto)`,
-        company: this.name,
-        url: this.jobsUrl,
-        description: `Oportunidade na ${this.name} para especialistas em Inteligência Artificial, avaliação de modelos de linguagem (LLMs) e revisão de código ou textos em Português do Brasil. Sem exigência de entrevista oral em inglês. Pagamento em ${this.customCurrency} (${this.customPayRate}).`,
-        location: 'Remoto (Brasil)',
-        country: 'Brasil',
-        published_at: new Date().toISOString(),
-        salary_min: 15,
-        salary_max: 40,
-        salary_currency: this.customCurrency
-      },
-      {
-        id: `${this.slug}-dynamic-2`,
-        title: `${this.name} - Especialista em Avaliação de Conteúdo e IA`,
-        company: this.name,
-        url: this.jobsUrl,
-        description: `Trabalhe avaliando e treinando sistemas de IA na ${this.name}. Flexibilidade total de horários, ideal para profissionais no Brasil. Remuneração em moeda forte (${this.customCurrency}). Processo 100% online sem entrevistas faladas.`,
-        location: 'Remoto (Brasil)',
-        country: 'Brasil',
-        published_at: new Date().toISOString(),
-        salary_min: 12,
-        salary_max: 30,
-        salary_currency: this.customCurrency
-      }
-    ];
+    // Sem vagas fabricadas: se a fonte falhar ou não houver vagas públicas acessíveis, retorna vazio
+    return [];
   }
 
   normalizeJob(raw: RawJob): NormalizedJob {
@@ -109,25 +82,34 @@ export class GenericDynamicConnector extends SourceConnector {
       salary_min: raw.salary_min || null,
       salary_max: raw.salary_max || null,
       salary_currency: raw.salary_currency || this.customCurrency,
-      published_at: raw.published_at || new Date().toISOString(),
-      analysis: {
-        english_status: 'DESIRABLE',
-        portuguese_required: true,
-        portuguese_level: 'NATIVE',
-        brazil_eligible: true,
-        remote_eligible: true,
-        job_category: 'AI',
-        experience_level: 'ENTRY',
-        salary_detected: true,
-        salary_min: raw.salary_min || 15,
-        salary_max: raw.salary_max || 35,
-        salary_currency: this.customCurrency,
-        compatibility_score: 95,
-        confidence: 90,
-        reason: `Vaga cadastrada e monitorada na plataforma ${this.name}. Trabalho em ${this.customCurrency} sem exigência de entrevista oral em inglês.`,
-        analysis_version: 'v1',
-        analyzed_at: new Date().toISOString()
-      }
+      published_at: raw.published_at || new Date().toISOString()
     };
+  }
+
+  override async getSourceStatus() {
+    try {
+      const jobs = await this.getJobs();
+      if (jobs.length > 0) {
+        return {
+          status: 'HEALTHY' as const,
+          jobs_count: jobs.length,
+          message: `Fonte operacional. ${jobs.length} vagas encontradas.`,
+          last_checked_at: new Date().toISOString()
+        };
+      }
+      return {
+        status: 'WARNING' as const,
+        jobs_count: 0,
+        message: `Sem dados: Nenhuma vaga encontrada no portal da ${this.name}.`,
+        last_checked_at: new Date().toISOString()
+      };
+    } catch (err: any) {
+      return {
+        status: 'ERROR' as const,
+        jobs_count: 0,
+        message: `Sem dados: Falha ao conectar com ${this.name} (${err.message || 'Erro de rede'}).`,
+        last_checked_at: new Date().toISOString()
+      };
+    }
   }
 }

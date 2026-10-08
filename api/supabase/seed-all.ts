@@ -2,7 +2,6 @@ import { getSupabaseServerClient } from '../../src/lib/supabase/server';
 import { INITIAL_PLATFORMS } from '../../src/data/initialPlatforms';
 import { DEFAULT_BLOCKED_KEYWORDS } from '../../src/services/blockedKeywordsService';
 import LIVE_JOBS_RAW from '../../src/data/liveCuratedJobs.json';
-import { CURATED_JOBS } from '../../src/data/curatedJobs';
 
 function generateHash(text: string): string {
   if (!text) return '0'.repeat(64);
@@ -84,37 +83,16 @@ export default async function handler(req: any, res: any) {
       fallbackPlatformId = plats[0].id;
     }
 
-    // 3. Semeia jobs e job_analysis
-    const allRaw = [...(LIVE_JOBS_RAW as any[]), ...CURATED_JOBS.map(j => ({
-      external_id: j.id,
-      platform_slug: j.platformId || 'welocalize',
-      title: j.title,
-      company: j.company,
-      url: j.url,
-      canonical_url: j.url,
-      source_url: j.url,
-      description: j.description,
-      country: 'Brasil',
-      location: 'Remoto',
-      remote: true,
-      employment_type: 'Freelance',
-      salary_min: null,
-      salary_max: null,
-      salary_currency: j.currency,
-      published_at: j.publishedAt,
-      analysis: {
-        english_status: j.requiresEnglishInterview ? 'REQUIRED' : 'NONE',
-        portuguese_required: true,
-        portuguese_level: 'NATIVE',
-        brazil_eligible: true,
-        remote_eligible: true,
-        job_category: 'AI',
-        experience_level: 'ENTRY',
-        compatibility_score: j.requiresEnglishInterview ? 40 : 95,
-        confidence: 90,
-        reason: 'Curadoria padrão'
-      }
-    }))];
+    // 3. Remove quaisquer vagas legadas fabricadas/fictícias que possam existir no banco
+    try {
+      await supabase
+        .from('jobs')
+        .delete()
+        .or('external_id.ilike.welo-%,external_id.ilike.outlier-%,external_id.ilike.turing-%,external_id.ilike.app-%,external_id.ilike.align-%,external_id.ilike.one-%,external_id.ilike.click-%,external_id.ilike.data-%,external_id.ilike.mercor-%,external_id.ilike.%-dynamic-%');
+    } catch {}
+
+    // 4. Semeia apenas vagas reais verificadas
+    const allRaw = (LIVE_JOBS_RAW as any[]) || [];
 
     const seenIds = new Set<string>();
     const insertedJobIds: string[] = [];

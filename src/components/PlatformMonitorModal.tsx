@@ -191,7 +191,7 @@ export const PlatformMonitorModal: React.FC<PlatformMonitorModalProps> = ({
                         ) : (
                           <>
                             <AlertCircle className="w-3 h-3 text-amber-400" />
-                            Aguardando coleta
+                            Sem dados
                           </>
                         )}
                       </span>

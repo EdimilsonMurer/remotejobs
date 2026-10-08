@@ -10,9 +10,8 @@ import { PlatformModal } from './components/PlatformModal';
 import { PipelineMonitor } from './components/PipelineMonitor';
 import { Platform, BlacklistRule, JobOpportunity } from './types/job';
 import { INITIAL_PLATFORMS, INITIAL_BLACKLIST_RULES } from './data/initialPlatforms';
-import { CURATED_JOBS } from './data/curatedJobs';
 import { loadPlatformsFromSupabase, savePlatformToSupabase, deletePlatformFromSupabase } from './lib/supabase/platforms';
-import { saveJobToSupabase, harvestJobsForPlatform } from './lib/supabase/jobs';
+import { saveJobToSupabase, harvestJobsForPlatform, isFabricatedJob } from './lib/supabase/jobs';
 
 const STORAGE_KEY_PLATFORMS = 'remotehunter_platforms_v1';
 const STORAGE_KEY_RULES = 'remotehunter_blacklist_rules_v1';
@@ -93,12 +92,14 @@ export default function App() {
       const savedJobs = localStorage.getItem('remotehunter_custom_jobs_v1');
       if (savedJobs) {
         const parsed = JSON.parse(savedJobs);
-        return [...parsed, ...CURATED_JOBS];
+        if (Array.isArray(parsed)) {
+          return parsed.filter(j => !isFabricatedJob({ external_id: j.id, title: j.title, description: j.description }));
+        }
       }
     } catch (e) {
       console.error('Error loading custom jobs:', e);
     }
-    return CURATED_JOBS;
+    return [];
   });
 
   const handleAddCustomJob = (newJob: JobOpportunity) => {
@@ -129,24 +130,7 @@ export default function App() {
       salary_max: null,
       salary_currency: newJob.currency || 'USD',
       published_at: new Date().toISOString(),
-      analysis: {
-        english_status: newJob.requiresEnglishInterview ? 'REQUIRED' : 'NONE',
-        portuguese_required: true,
-        portuguese_level: 'NATIVE',
-        brazil_eligible: true,
-        remote_eligible: true,
-        job_category: 'AI',
-        experience_level: 'ENTRY',
-        salary_detected: true,
-        salary_min: null,
-        salary_max: null,
-        salary_currency: newJob.currency || 'USD',
-        compatibility_score: newJob.requiresEnglishInterview ? 40 : 95,
-        confidence: 90,
-        reason: 'Vaga cadastrada pelo usuário.',
-        analysis_version: 'v1',
-        analyzed_at: new Date().toISOString()
-      }
+      analysis: undefined
     }).catch(err => console.warn('[Supabase] Erro ao salvar vaga:', err));
   };
 

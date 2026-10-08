@@ -90,6 +90,21 @@ async function executeJobSchemaFallback(
 }
 
 /**
+ * Detecta se uma vaga possui formato ou conteúdo de dados fabricados/fictícios legados
+ */
+export function isFabricatedJob(job: { external_id?: string; title?: string; description?: string }): boolean {
+  if (!job) return false;
+  const id = String(job.external_id || '');
+  const desc = String(job.description || '');
+  if (/^(welo|outlier|turing|app|align|one|click|data)-\d+$/i.test(id)) return true;
+  if (/^mercor-(ai-evaluator|prompt-specialist|code-reviewer|cultural-alignment|math-reasoning|content-safety)/i.test(id)) return true;
+  if (/-dynamic-[12]$/i.test(id)) return true;
+  if (desc.includes('Sem exigência de entrevista oral em inglês. Pagamento em')) return true;
+  if (desc.includes('Processo 100% online sem entrevistas faladas')) return true;
+  return false;
+}
+
+/**
  * Converte um registro do Supabase para o formato unificado da aplicação
  */
 export function databaseRowToJob(row: any, analysisRow?: any): UnifiedJobWithStatus {
@@ -122,9 +137,9 @@ export function databaseRowToJob(row: any, analysisRow?: any): UnifiedJobWithSta
       salary_min: analysisRow.salary_min !== null ? Number(analysisRow.salary_min) : null,
       salary_max: analysisRow.salary_max !== null ? Number(analysisRow.salary_max) : null,
       salary_currency: analysisRow.salary_currency || 'USD',
-      compatibility_score: analysisRow.compatibility_score || 90,
-      confidence: analysisRow.confidence || 85,
-      reason: analysisRow.reason || 'Vaga registrada no banco de dados Supabase.',
+      compatibility_score: analysisRow.compatibility_score !== undefined && analysisRow.compatibility_score !== null ? Number(analysisRow.compatibility_score) : 50,
+      confidence: analysisRow.confidence !== undefined && analysisRow.confidence !== null ? Number(analysisRow.confidence) : 50,
+      reason: analysisRow.reason || 'Análise de compatibilidade registrada no banco de dados.',
       analysis_version: analysisRow.analysis_version || 'v1',
       analyzed_at: analysisRow.analyzed_at || new Date().toISOString()
     } : undefined
@@ -190,11 +205,27 @@ export async function loadJobsFromSupabase(): Promise<{
       console.warn('[Supabase Jobs] Aviso ao buscar job_analysis:', e?.message);
     }
 
-    // 3. Monta a lista completa unificada
-    const convertedList: UnifiedJobWithStatus[] = jobsRows.map((j: any) => {
-      const aRow = analysisMap.get(j.id);
-      return databaseRowToJob(j, aRow);
-    });
+    // 3. Monta a lista completa unificada excluindo qualquer vaga fabricada
+    const convertedList: UnifiedJobWithStatus[] = (jobsRows as any[])
+      .filter((j: any) => !isFabricatedJob(j))
+      .map((j: any) => {
+        const aRow = analysisMap.get(j.id);
+        return databaseRowToJob(j, aRow);
+      });
+
+    // Se houver registros fabricados no banco, executa limpeza automática no Supabase
+    const fabricatedDbIds = (jobsRows as any[])
+      .filter((j: any) => isFabricatedJob(j))
+      .map((j: any) => j.id);
+
+    if (fabricatedDbIds.length > 0) {
+      (async () => {
+        try {
+          await supabase.from('jobs').delete().in('id', fabricatedDbIds);
+          console.log(`[Supabase] Limpeza concluída: ${fabricatedDbIds.length} vagas fabricadas removidas.`);
+        } catch {}
+      })();
+    }
 
     let latestUpdateIso: string | null = null;
     for (const j of (jobsRows as any[])) {
@@ -718,76 +749,29 @@ export async function checkSupabaseHealth(): Promise<{
 export function getLocalBaselineJobs(): UnifiedJobWithStatus[] {
   const rawList = (LIVE_JOBS_RAW as any[]) || [];
   
-  const live: UnifiedJobWithStatus[] = rawList.map(item => ({
-    external_id: item.external_id,
-    platform_slug: item.platform_slug || 'welocalize',
-    title: item.title,
-    company: item.company,
-    url: item.url,
-    canonical_url: item.canonical_url,
-    source_url: item.source_url,
-    description: item.description,
-    country: item.country || 'Brasil',
-    location: item.location || 'Remoto',
-    remote: item.remote ?? true,
-    employment_type: item.employment_type || 'Freelance',
-    salary_min: item.salary_min,
-    salary_max: item.salary_max,
-    salary_currency: item.salary_currency || 'USD',
-    published_at: item.published_at || new Date().toISOString(),
-    analysis: item.analysis
-  }));
+  const live: UnifiedJobWithStatus[] = rawList
+    .filter(item => !isFabricatedJob(item))
+    .map(item => ({
+      external_id: item.external_id,
+      platform_slug: item.platform_slug || 'welocalize',
+      title: item.title,
+      company: item.company,
+      url: item.url,
+      canonical_url: item.canonical_url,
+      source_url: item.source_url,
+      description: item.description,
+      country: item.country || 'Brasil',
+      location: item.location || 'Remoto',
+      remote: item.remote ?? true,
+      employment_type: item.employment_type || 'Freelance',
+      salary_min: item.salary_min,
+      salary_max: item.salary_max,
+      salary_currency: item.salary_currency || 'USD',
+      published_at: item.published_at || new Date().toISOString(),
+      analysis: item.analysis
+    }));
 
-  const legacyConverted: UnifiedJobWithStatus[] = CURATED_JOBS.map(lj => ({
-    external_id: lj.id,
-    platform_slug: lj.platformId || 'welocalize',
-    title: lj.title,
-    company: lj.company,
-    url: lj.url,
-    canonical_url: lj.url,
-    source_url: lj.url,
-    description: lj.description,
-    country: 'Brasil',
-    location: 'Remoto (Brasil)',
-    remote: true,
-    employment_type: 'Freelance / Contratado',
-    salary_min: null,
-    salary_max: null,
-    salary_currency: lj.currency,
-    published_at: lj.publishedAt,
-    analysis: {
-      english_status: lj.requiresEnglishInterview ? 'REQUIRED' : 'NONE',
-      portuguese_required: true,
-      portuguese_level: 'NATIVE',
-      brazil_eligible: true,
-      remote_eligible: true,
-      job_category: lj.category.includes('IA') ? 'AI' : 'ANNOTATION',
-      experience_level: 'ENTRY',
-      salary_detected: true,
-      salary_min: null,
-      salary_max: null,
-      salary_currency: lj.currency,
-      compatibility_score: lj.requiresEnglishInterview ? 40 : 95,
-      confidence: 90,
-      reason: lj.requiresEnglishInterview 
-        ? 'Processo seletivo inclui entrevista ou triagem falada em inglês.'
-        : 'Trabalho focado em Português do Brasil com processo e entregas sem exigência de inglês.',
-      analysis_version: 'v1',
-      analyzed_at: new Date().toISOString()
-    }
-  }));
-
-  const seen = new Set<string>();
-  const combined: UnifiedJobWithStatus[] = [];
-
-  for (const j of [...live, ...legacyConverted]) {
-    if (!seen.has(j.external_id)) {
-      seen.add(j.external_id);
-      combined.push(j);
-    }
-  }
-
-  return combined;
+  return live;
 }
 
 /**

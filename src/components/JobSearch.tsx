@@ -44,7 +44,8 @@ import {
   unhideAllJobs, 
   getStoredSyncState, 
   saveSyncState,
-  formatSyncDateTime 
+  formatSyncDateTime,
+  isFabricatedJob
 } from '../services/jobsSyncService';
 import { 
   checkJobForBlockedKeywords, 
@@ -79,76 +80,61 @@ export const JobSearch: React.FC<JobSearchProps> = ({
   platforms,
   onOpenGuides
 }) => {
-  // Transforma vagas brutas e curadas em formato unificado
+  // Transforma vagas brutas em formato unificado sem dados fictícios
   const initialBaseJobs = useMemo<UnifiedJobWithStatus[]>(() => {
     const rawList = (LIVE_JOBS_RAW as any[]) || [];
     
     // Mapeia as vagas reais coletadas
-    const live: UnifiedJobWithStatus[] = rawList.map(item => ({
-      external_id: item.external_id,
-      platform_slug: item.platform_slug,
-      title: item.title,
-      company: item.company,
-      url: item.url,
-      canonical_url: item.canonical_url,
-      source_url: item.source_url,
-      description: item.description,
-      country: item.country,
-      location: item.location,
-      remote: item.remote,
-      employment_type: item.employment_type,
-      salary_min: item.salary_min,
-      salary_max: item.salary_max,
-      salary_currency: item.salary_currency,
-      published_at: item.published_at,
-      analysis: item.analysis
-    }));
+    const live: UnifiedJobWithStatus[] = rawList
+      .filter(item => !isFabricatedJob(item))
+      .map(item => ({
+        external_id: item.external_id,
+        platform_slug: item.platform_slug,
+        title: item.title,
+        company: item.company,
+        url: item.url,
+        canonical_url: item.canonical_url,
+        source_url: item.source_url,
+        description: item.description,
+        country: item.country,
+        location: item.location,
+        remote: item.remote,
+        employment_type: item.employment_type,
+        salary_min: item.salary_min,
+        salary_max: item.salary_max,
+        salary_currency: item.salary_currency,
+        published_at: item.published_at,
+        analysis: item.analysis
+      }));
 
-    // Converte as vagas curadas complementares
-    const legacyConverted: UnifiedJobWithStatus[] = legacyJobs.map(lj => ({
-      external_id: lj.id,
-      platform_slug: lj.platformId || 'welocalize',
-      title: lj.title,
-      company: lj.company,
-      url: lj.url,
-      canonical_url: lj.url,
-      source_url: lj.url,
-      description: lj.description,
-      country: 'Brasil',
-      location: 'Remoto (Brasil)',
-      remote: true,
-      employment_type: 'Freelance / Contratado',
-      salary_min: null,
-      salary_max: null,
-      salary_currency: lj.currency,
-      published_at: lj.publishedAt,
-      analysis: {
-        english_status: lj.requiresEnglishInterview ? 'REQUIRED' : 'NONE',
-        portuguese_required: true,
-        portuguese_level: 'NATIVE',
-        brazil_eligible: true,
-        remote_eligible: true,
-        job_category: lj.category.includes('IA') ? 'AI' : 'ANNOTATION',
-        experience_level: 'ENTRY',
-        salary_detected: true,
+    // Converte apenas vagas legítimas adicionadas pelo usuário (não fabricadas)
+    const customValid: UnifiedJobWithStatus[] = (legacyJobs || [])
+      .filter(lj => !isFabricatedJob({ external_id: lj.id, title: lj.title, description: lj.description }))
+      .map(lj => ({
+        external_id: lj.id,
+        platform_slug: lj.platformId || 'outros',
+        title: lj.title,
+        company: lj.company,
+        url: lj.url,
+        canonical_url: lj.url,
+        source_url: lj.url,
+        description: lj.description,
+        country: 'Brasil',
+        location: 'Remoto (Brasil)',
+        remote: true,
+        employment_type: 'Freelance',
         salary_min: null,
         salary_max: null,
         salary_currency: lj.currency,
-        compatibility_score: lj.requiresEnglishInterview ? 40 : 95,
-        confidence: 90,
-        reason: lj.requiresEnglishInterview 
-          ? 'Processo seletivo inclui entrevista ou triagem falada em inglês.'
-          : 'Trabalho focado em Português do Brasil com processo e entregas sem exigência de inglês.',
-        analysis_version: 'v1',
-        analyzed_at: new Date().toISOString()
-      }
-    }));
+        published_at: lj.publishedAt,
+        analysis: undefined
+      }));
 
     // Combina garantindo IDs únicos
     const seen = new Set<string>();
     const combined: UnifiedJobWithStatus[] = [];
 
-    for (const j of [...live, ...legacyConverted]) {
+    for (const j of [...live, ...customValid]) {
       if (!seen.has(j.external_id)) {
         seen.add(j.external_id);
         combined.push(j);
@@ -362,27 +348,12 @@ export const JobSearch: React.FC<JobSearchProps> = ({
         if (response.ok) {
           const data = await response.json();
           if (Array.isArray(data.jobs) && data.jobs.length > 0) {
-            const freshlyCollected: UnifiedJobWithStatus[] = data.jobs.map((item: any) => ({
-              ...item,
-              analysis: item.analysis || {
-                english_status: 'NONE',
-                portuguese_required: true,
-                portuguese_level: 'NATIVE',
-                brazil_eligible: true,
-                remote_eligible: true,
-                job_category: 'AI',
-                experience_level: 'ENTRY',
-                salary_detected: true,
-                salary_min: null,
-                salary_max: null,
-                salary_currency: 'USD',
-                compatibility_score: 95,
-                confidence: 90,
-                reason: 'Vaga verificada diretamente no portal oficial.',
-                analysis_version: 'v1',
-                analyzed_at: new Date().toISOString()
-              }
-            }));
+            const freshlyCollected: UnifiedJobWithStatus[] = data.jobs
+              .filter((item: any) => !isFabricatedJob(item))
+              .map((item: any) => ({
+                ...item,
+                analysis: item.analysis || undefined
+              }));
 
             // Persiste no Supabase caso configurado
             if (isSupabaseConfigured()) {
@@ -1217,18 +1188,22 @@ export const JobSearch: React.FC<JobSearchProps> = ({
         <div className="bg-white rounded-2xl p-12 text-center border border-slate-200 space-y-3">
           <Info className="w-10 h-10 text-slate-400 mx-auto" />
           <h3 className="text-base font-bold text-slate-800">
-            {viewMode === 'NEW_ONLY' 
+            {selectedPlatform !== 'ALL'
+              ? `Sem dados para ${platforms.find(p => p.id === selectedPlatform)?.name || 'esta plataforma'}`
+              : viewMode === 'NEW_ONLY' 
               ? 'Nenhuma vaga nova pendente' 
               : viewMode === 'HIDDEN_ONLY' 
               ? 'Nenhuma vaga ocultada no momento' 
-              : 'Nenhuma oportunidade encontrada'}
+              : 'Sem dados de vagas disponíveis'}
           </h3>
           <p className="text-sm text-slate-500 max-w-md mx-auto">
-            {viewMode === 'NEW_ONLY' 
+            {selectedPlatform !== 'ALL'
+              ? 'Esta plataforma não retornou vagas públicas ativas ou a fonte está sem dados no momento.'
+              : viewMode === 'NEW_ONLY' 
               ? 'Todas as novas vagas já foram avaliadas ou marcadas como vistas. Você pode clicar em "Todas as Vagas" para ver a base completa ou em "Atualizar Banco de Vagas" para buscar novas oportunidades.'
               : viewMode === 'HIDDEN_ONLY'
               ? 'Você ainda não ocultou nenhuma vaga. Quando quiser retirar alguma vaga da visualização no app, utilize o botão "Ocultar" no card.'
-              : 'Tente desmarcar o filtro "Apenas Português" ou limpar os termos de busca para ver todas as vagas coletadas.'}
+              : 'Nenhuma vaga encontrada para os critérios selecionados ou as fontes estão sem dados no momento.'}
           </p>
           <div className="flex items-center justify-center gap-2 pt-2">
             {viewMode !== 'ALL' && (

@@ -101,14 +101,30 @@ export function saveSyncState(state: SyncState): void {
 }
 
 /**
+ * Detecta e filtra qualquer vaga fictícia/fabricada remanescente
+ */
+export function isFabricatedJob(job: { external_id?: string; title?: string; description?: string }): boolean {
+  if (!job) return false;
+  const id = String(job.external_id || '');
+  const desc = String(job.description || '');
+  if (/^(welo|outlier|turing|app|align|one|click|data)-\d+$/i.test(id)) return true;
+  if (/^mercor-(ai-evaluator|prompt-specialist|code-reviewer|cultural-alignment|math-reasoning|content-safety)/i.test(id)) return true;
+  if (/-dynamic-[12]$/i.test(id)) return true;
+  if (desc.includes('Sem exigência de entrevista oral em inglês. Pagamento em')) return true;
+  if (desc.includes('Processo 100% online sem entrevistas faladas')) return true;
+  return false;
+}
+
+/**
  * Aplica os marcadores is_new, is_seen e is_hidden à lista de vagas com base no estado salvo
  */
 export function applyNewJobFlags(jobs: UnifiedJobWithStatus[]): UnifiedJobWithStatus[] {
   let state = getStoredSyncState();
+  const cleanJobs = jobs.filter(j => !isFabricatedJob(j));
 
   // Se for a primeira inicialização no navegador, define o baseline com as vagas existentes
-  if (state.knownIds.size === 0 && jobs.length > 0) {
-    const allIds = new Set(jobs.map(j => j.external_id));
+  if (state.knownIds.size === 0 && cleanJobs.length > 0) {
+    const allIds = new Set(cleanJobs.map(j => j.external_id));
     
     state = {
       knownIds: allIds,
@@ -120,7 +136,7 @@ export function applyNewJobFlags(jobs: UnifiedJobWithStatus[]): UnifiedJobWithSt
     saveSyncState(state);
   }
 
-  return jobs.map(job => {
+  return cleanJobs.map(job => {
     const isNew = state.newIds.has(job.external_id) && !state.seenIds.has(job.external_id);
     const isSeen = state.seenIds.has(job.external_id);
     const isHidden = state.hiddenIds.has(job.external_id);
@@ -152,10 +168,13 @@ export function processDatabaseUpdate(
   const state = getStoredSyncState();
   const syncTimestamp = new Date().toISOString();
 
+  const cleanExisting = existingJobs.filter(j => !isFabricatedJob(j));
+  const cleanIncoming = freshIncomingJobs.filter(j => !isFabricatedJob(j));
+
   // Se não havia estado anterior, usa a lista atual como base
   const previousKnownIds = state.knownIds.size > 0 
     ? state.knownIds 
-    : new Set(existingJobs.map(j => j.external_id));
+    : new Set(cleanExisting.map(j => j.external_id));
 
   const newlyDiscoveredIds: string[] = [];
   const updatedKnownIds = new Set(previousKnownIds);
@@ -164,7 +183,7 @@ export function processDatabaseUpdate(
   const mergedMap = new Map<string, UnifiedJobWithStatus>();
 
   // Primeiro adiciona as existentes
-  for (const job of existingJobs) {
+  for (const job of cleanExisting) {
     mergedMap.set(job.external_id, { 
       ...job,
       is_hidden: state.hiddenIds.has(job.external_id)
@@ -172,7 +191,7 @@ export function processDatabaseUpdate(
   }
 
   // Agora compara e insere as recebidas
-  for (const fresh of freshIncomingJobs) {
+  for (const fresh of cleanIncoming) {
     const isBrandNew = !previousKnownIds.has(fresh.external_id);
 
     if (isBrandNew) {
