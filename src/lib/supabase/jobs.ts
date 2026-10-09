@@ -6,6 +6,7 @@ import { loadBlockedKeywordsFromSupabase } from '../../services/blockedKeywordsS
 import { seedInitialApplicationsToSupabase } from './applications';
 import { seedInitialSourceLogsToSupabase } from './sourceLogs';
 import { seedInitialJobHistoryToSupabase } from './history';
+import { loadCandidateNotes, saveCandidateNotesToSupabase } from './candidateNotes';
 
 /**
  * Gera um hash determinístico de 64 caracteres hexadecimais (compatível com VARCHAR(64) NOT NULL)
@@ -571,6 +572,12 @@ export async function seedAllDatabaseTablesToSupabase(): Promise<{
   // 6. Atualiza Histórico
   const historyCount = Math.min(jobsCount, 20);
 
+  // 7. Sincroniza Bloco de Notas do Candidato (candidate_notes)
+  try {
+    const { data: cData } = await loadCandidateNotes();
+    await saveCandidateNotesToSupabase(cData);
+  } catch {}
+
   const success = jobsCount > 0 || platformsCount > 0;
 
   return {
@@ -605,6 +612,7 @@ export async function checkSupabaseHealth(): Promise<{
   sourceLogsCount: number;
   jobHistoryCount: number;
   favoritesCount: number;
+  candidateNotesCount?: number;
   error?: string;
 }> {
   if (!isSupabaseConfigured()) {
@@ -723,6 +731,16 @@ export async function checkSupabaseHealth(): Promise<{
     }
   } catch {}
 
+  // 9. candidate_notes
+  let candidateNotesCount = 0;
+  try {
+    const { count, error } = await (supabase.from('candidate_notes') as any)
+      .select('*', { head: true, count: 'exact' });
+    if (!error && count !== null) {
+      candidateNotesCount = count;
+    }
+  } catch {}
+
   return {
     isConfigured: true,
     isConnected,
@@ -737,6 +755,7 @@ export async function checkSupabaseHealth(): Promise<{
     sourceLogsCount,
     jobHistoryCount,
     favoritesCount,
+    candidateNotesCount,
     error: lastError || undefined
   };
 }

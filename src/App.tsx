@@ -8,6 +8,7 @@ import { SettingsManager } from './components/SettingsManager';
 import { GuidesModal } from './components/GuidesModal';
 import { PlatformModal } from './components/PlatformModal';
 import { PipelineMonitor } from './components/PipelineMonitor';
+import { CandidateNotepad } from './components/CandidateNotepad';
 import { Platform, BlacklistRule, JobOpportunity } from './types/job';
 import { INITIAL_PLATFORMS, INITIAL_BLACKLIST_RULES } from './data/initialPlatforms';
 import { loadPlatformsFromSupabase, savePlatformToSupabase, deletePlatformFromSupabase } from './lib/supabase/platforms';
@@ -21,7 +22,7 @@ const sortPlatformsAlphabetically = (list: Platform[]): Platform[] => {
 };
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<'jobs' | 'platforms' | 'blacklist' | 'crewai' | 'guide' | 'pipeline' | 'settings'>('jobs');
+  const [activeTab, setActiveTab] = useState<'jobs' | 'platforms' | 'blacklist' | 'crewai' | 'guide' | 'pipeline' | 'settings' | 'notepad'>('jobs');
   
   // Load state from localStorage with fallbacks & auto-migration (sempre em ordem alfabética)
   const [platforms, setPlatforms] = useState<Platform[]>(() => {
@@ -297,6 +298,10 @@ export default function App() {
             onOpenAddModal={handleOpenAdd}
             onOpenEditModal={handleOpenEdit}
           />
+        )}
+
+        {activeTab === 'notepad' && (
+          <CandidateNotepad />
         )}
 
         {activeTab === 'blacklist' && (

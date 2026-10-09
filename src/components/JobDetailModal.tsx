@@ -17,8 +17,10 @@ import {
   Loader2,
   EyeOff,
   Eye,
-  DollarSign
+  DollarSign,
+  Clipboard
 } from 'lucide-react';
+import { CandidateNotepad } from './CandidateNotepad';
 import { NormalizedJob } from '../connectors/base/types';
 import { JobAnalysis } from '../types/job';
 import { getPortugueseJobDescription, quickTranslateText } from '../services/translationService';
@@ -45,6 +47,7 @@ export const JobDetailModal: React.FC<JobDetailModalProps> = ({
   const [language, setLanguage] = useState<'pt' | 'en'>('pt');
   const [translatedDescription, setTranslatedDescription] = useState<string>('');
   const [isTranslating, setIsTranslating] = useState<boolean>(false);
+  const [showCandidateNotepad, setShowCandidateNotepad] = useState<boolean>(false);
 
   const blockedCheck = job ? checkJobForBlockedKeywords(job.title, job.description) : { isBlocked: false, matchedTerms: [] };
 
@@ -396,6 +399,16 @@ export const JobDetailModal: React.FC<JobDetailModalProps> = ({
                 <span>Marcar como Vista</span>
               </button>
             )}
+            <button
+              type="button"
+              onClick={() => setShowCandidateNotepad(true)}
+              className="px-3.5 py-2.5 text-xs font-semibold text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-lg transition-colors flex items-center justify-center gap-1.5 flex-1 sm:flex-initial cursor-pointer"
+              title="Abrir Bloco de Notas com suas informações para copiar em 1 clique"
+            >
+              <Clipboard className="w-4 h-4 text-blue-600" />
+              <span>Copiar Meus Dados</span>
+            </button>
+
             <button 
               onClick={onClose}
               className="px-4 py-2.5 text-xs font-semibold text-slate-600 hover:text-slate-900 hover:bg-slate-200/60 rounded-lg transition-colors flex-1 sm:flex-initial cursor-pointer"
@@ -414,6 +427,15 @@ export const JobDetailModal: React.FC<JobDetailModalProps> = ({
           </div>
         </div>
       </div>
+
+      {/* Drawer / Modal do Bloco de Notas do Candidato para preenchimento ágil */}
+      {showCandidateNotepad && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-end bg-slate-950/70 backdrop-blur-sm p-2 sm:p-4">
+          <div className="w-full max-w-2xl h-full max-h-[95vh] bg-slate-950 rounded-2xl shadow-2xl border border-slate-800 flex flex-col overflow-hidden">
+            <CandidateNotepad isDrawer={true} onClose={() => setShowCandidateNotepad(false)} />
+          </div>
+        </div>
+      )}
     </div>
   );
 };

@@ -192,6 +192,44 @@ CREATE TABLE IF NOT EXISTS favorites (
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- 8.1. TABELA DO BLOCO DE NOTAS DO CANDIDATO (candidate_notes)
+CREATE TABLE IF NOT EXISTS candidate_notes (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id UUID,
+    full_name TEXT DEFAULT '',
+    email TEXT DEFAULT '',
+    phone TEXT DEFAULT '',
+    city TEXT DEFAULT '',
+    state TEXT DEFAULT '',
+    country TEXT DEFAULT 'Brasil',
+    timezone TEXT DEFAULT 'America/Sao_Paulo (UTC-3)',
+    linkedin_url TEXT DEFAULT '',
+    github_url TEXT DEFAULT '',
+    portfolio_url TEXT DEFAULT '',
+    resume_url TEXT DEFAULT '',
+    resume_en_url TEXT DEFAULT '',
+    hourly_rate_usd TEXT DEFAULT '',
+    monthly_salary_usd TEXT DEFAULT '',
+    availability TEXT DEFAULT 'Imediata',
+    hours_per_week TEXT DEFAULT '40h/semana',
+    payment_paypal TEXT DEFAULT '',
+    payment_payoneer TEXT DEFAULT '',
+    payment_deel TEXT DEFAULT '',
+    payment_wise TEXT DEFAULT '',
+    tax_id TEXT DEFAULT '',
+    short_bio_pt TEXT DEFAULT '',
+    short_bio_en TEXT DEFAULT '',
+    cover_letter_pt TEXT DEFAULT '',
+    cover_letter_en TEXT DEFAULT '',
+    ai_experience_en TEXT DEFAULT '',
+    english_level_statement TEXT DEFAULT '',
+    hardware_specs TEXT DEFAULT '',
+    free_notes TEXT DEFAULT '',
+    custom_snippets JSONB DEFAULT '[]'::jsonb,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
 -- 9. ÍNDICES DE PERFORMANCE
 CREATE INDEX IF NOT EXISTS idx_platforms_slug ON platforms(slug);
 CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status);
@@ -211,6 +249,7 @@ ALTER TABLE blocked_keywords ENABLE ROW LEVEL SECURITY;
 ALTER TABLE source_logs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE job_history ENABLE ROW LEVEL SECURITY;
 ALTER TABLE favorites ENABLE ROW LEVEL SECURITY;
+ALTER TABLE candidate_notes ENABLE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS "Public access platforms" ON platforms;
 CREATE POLICY "Public access platforms" ON platforms FOR ALL USING (true) WITH CHECK (true);
@@ -235,6 +274,9 @@ CREATE POLICY "Public access job_history" ON job_history FOR ALL USING (true) WI
 
 DROP POLICY IF EXISTS "Public access favorites" ON favorites;
 CREATE POLICY "Public access favorites" ON favorites FOR ALL USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Public access candidate_notes" ON candidate_notes;
+CREATE POLICY "Public access candidate_notes" ON candidate_notes FOR ALL USING (true) WITH CHECK (true);
 
 -- Permissões explícitas de GRANT
 GRANT ALL ON ALL TABLES IN SCHEMA public TO anon, authenticated, service_role;

@@ -1,9 +1,9 @@
 import React from 'react';
-import { ShieldAlert, Compass, Layers, Settings, BookOpen, Plus, Bot, Globe, Activity } from 'lucide-react';
+import { ShieldAlert, Compass, Layers, Settings, BookOpen, Plus, Bot, Globe, Activity, Clipboard } from 'lucide-react';
 
 interface HeaderProps {
-  activeTab: 'jobs' | 'platforms' | 'blacklist' | 'crewai' | 'guide' | 'pipeline' | 'settings';
-  setActiveTab: (tab: 'jobs' | 'platforms' | 'blacklist' | 'crewai' | 'guide' | 'pipeline' | 'settings') => void;
+  activeTab: 'jobs' | 'platforms' | 'blacklist' | 'crewai' | 'guide' | 'pipeline' | 'settings' | 'notepad';
+  setActiveTab: (tab: 'jobs' | 'platforms' | 'blacklist' | 'crewai' | 'guide' | 'pipeline' | 'settings' | 'notepad') => void;
   blacklistCount: number;
   favoritesCount: number;
   activeAccountsCount: number;
@@ -73,6 +73,19 @@ export const Header: React.FC<HeaderProps> = ({
                 {activeAccountsCount} ativas
               </span>
             )}
+          </button>
+
+          {/* Bloco de Notas / Minhas Informações para Vagas */}
+          <button
+            onClick={() => setActiveTab('notepad')}
+            className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors whitespace-nowrap flex items-center gap-1.5 ${
+              activeTab === 'notepad'
+                ? 'bg-slate-800 text-blue-400 border border-slate-700 shadow-sm'
+                : 'text-slate-400 hover:text-blue-300 hover:bg-slate-900'
+            }`}
+          >
+            <Clipboard className="w-3.5 h-3.5 text-blue-400" />
+            <span>Bloco de Notas</span>
           </button>
 
           <button
@@ -173,6 +186,14 @@ export const Header: React.FC<HeaderProps> = ({
           }`}
         >
           Plataformas
+        </button>
+        <button
+          onClick={() => setActiveTab('notepad')}
+          className={`px-2.5 py-1 text-xs font-medium rounded whitespace-nowrap ${
+            activeTab === 'notepad' ? 'bg-slate-800 text-blue-400' : 'text-slate-400'
+          }`}
+        >
+          Bloco de Notas
         </button>
         <button
           onClick={() => setActiveTab('crewai')}
