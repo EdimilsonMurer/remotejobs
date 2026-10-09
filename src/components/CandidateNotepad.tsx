@@ -5,17 +5,15 @@ import {
   Database, 
   Download, 
   Upload, 
-  Sparkles, 
   FileText, 
   BookOpen, 
   Plus, 
   Trash2, 
   Search, 
-  HelpCircle,
-  X,
-  Copy,
+  X, 
+  Copy, 
   Edit2,
-  Tag
+  AlertTriangle
 } from 'lucide-react';
 import { 
   CandidateProfileData, 
@@ -33,23 +31,22 @@ interface CandidateNotepadProps {
 
 export const CandidateNotepad: React.FC<CandidateNotepadProps> = ({ isDrawer = false, onClose }) => {
   const [profile, setProfile] = useState<CandidateProfileData>(DEFAULT_CANDIDATE_PROFILE);
-  const [activeSubTab, setActiveSubTab] = useState<'fields' | 'templates' | 'free_notes'>('fields');
+  const [activeSubTab, setActiveSubTab] = useState<'fields' | 'free_notes'>('fields');
   const [searchTerm, setSearchTerm] = useState('');
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
-  const [saveStatus, setSaveStatus] = useState<{ type: 'saved' | 'saving' | 'error'; message: string; source: 'supabase' | 'local' }>({
+  const [saveStatus, setSaveStatus] = useState<{ type: 'saved' | 'saving' | 'error' | 'warning'; message: string }>({
     type: 'saved',
-    message: 'Carregando dados...',
-    source: 'local'
+    message: 'Carregando dados do Supabase...'
   });
   const [lastSavedTime, setLastSavedTime] = useState<string>('');
   
-  // Estado para novo campo
+  // Estado para adicionar novo campo
   const [showAddFieldModal, setShowAddFieldModal] = useState(false);
   const [newFieldTitle, setNewFieldTitle] = useState('');
   const [newFieldContent, setNewFieldContent] = useState('');
-  const [newFieldCategory, setNewFieldCategory] = useState('Geral');
+  const [newFieldCategory, setNewFieldCategory] = useState('');
 
-  // Estado para edição de campo existente
+  // Estado para editar campo existente
   const [editingSnippetId, setEditingSnippetId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState('');
   const [editingContent, setEditingContent] = useState('');
@@ -57,18 +54,25 @@ export const CandidateNotepad: React.FC<CandidateNotepadProps> = ({ isDrawer = f
 
   const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Carrega dados iniciais do Supabase / localStorage
+  // Carrega dados diretamente do Supabase ao abrir
   useEffect(() => {
     let isMounted = true;
     loadCandidateNotes().then(({ data, source }) => {
       if (!isMounted) return;
       setProfile(data);
-      const isCloud = source === 'supabase' && isSupabaseConfigured();
-      setSaveStatus({
-        type: 'saved',
-        message: isCloud ? 'Sincronizado com Supabase ✓' : 'Armazenado Localmente (Offline)',
-        source: isCloud ? 'supabase' : 'local'
-      });
+      if (source === 'supabase') {
+        setSaveStatus({
+          type: 'saved',
+          message: 'Sincronizado com Supabase ✓'
+        });
+      } else {
+        const configured = isSupabaseConfigured();
+        setSaveStatus({
+          type: configured ? 'saved' : 'warning',
+          message: configured ? 'Supabase Conectado ✓' : 'Atenção: Supabase não conectado'
+        });
+      }
+
       if (data.updated_at) {
         try {
           const d = new Date(data.updated_at);
@@ -82,12 +86,12 @@ export const CandidateNotepad: React.FC<CandidateNotepadProps> = ({ isDrawer = f
     };
   }, []);
 
-  // Autosave automático no Supabase com debounce (500ms)
+  // Autosave automático no Supabase com debounce (500ms) ao digitar
   const triggerAutoSave = (updatedProfile: CandidateProfileData) => {
     if (debounceTimerRef.current) {
       clearTimeout(debounceTimerRef.current);
     }
-    setSaveStatus(prev => ({ ...prev, type: 'saving', message: 'Gravando no Supabase...' }));
+    setSaveStatus({ type: 'saving', message: 'Gravando no Supabase...' });
 
     debounceTimerRef.current = setTimeout(async () => {
       const res = await saveCandidateNotesToSupabase(updatedProfile);
@@ -95,52 +99,40 @@ export const CandidateNotepad: React.FC<CandidateNotepadProps> = ({ isDrawer = f
       setLastSavedTime(timeStr);
 
       if (res.success) {
-        const isCloud = isSupabaseConfigured();
         setSaveStatus({
           type: 'saved',
-          message: isCloud ? `Gravado no Supabase às ${timeStr} ✓` : `Salvo localmente às ${timeStr}`,
-          source: isCloud ? 'supabase' : 'local'
+          message: `Gravado no Supabase às ${timeStr} ✓`
         });
       } else {
         setSaveStatus({
           type: 'error',
-          message: res.error || 'Erro ao sincronizar com Supabase',
-          source: 'local'
+          message: res.error || 'Erro ao gravar no Supabase'
         });
       }
     }, 500);
   };
 
-  // Salva imediatamente sem esperar debounce (para inclusões ou exclusões de campos)
+  // Salva imediatamente no Supabase sem debounce (inclusões/exclusões)
   const saveImmediately = async (updatedProfile: CandidateProfileData) => {
     if (debounceTimerRef.current) {
       clearTimeout(debounceTimerRef.current);
     }
-    setSaveStatus(prev => ({ ...prev, type: 'saving', message: 'Gravando no Supabase...' }));
+    setSaveStatus({ type: 'saving', message: 'Gravando no Supabase...' });
     const res = await saveCandidateNotesToSupabase(updatedProfile);
     const timeStr = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
     setLastSavedTime(timeStr);
 
     if (res.success) {
-      const isCloud = isSupabaseConfigured();
       setSaveStatus({
         type: 'saved',
-        message: isCloud ? `Gravado no Supabase às ${timeStr} ✓` : `Salvo localmente às ${timeStr}`,
-        source: isCloud ? 'supabase' : 'local'
+        message: `Gravado no Supabase às ${timeStr} ✓`
       });
     } else {
       setSaveStatus({
         type: 'error',
-        message: res.error || 'Erro ao sincronizar com Supabase',
-        source: 'local'
+        message: res.error || 'Erro ao gravar no Supabase'
       });
     }
-  };
-
-  const handleFieldChange = (field: keyof CandidateProfileData, value: any) => {
-    const updated = { ...profile, [field]: value };
-    setProfile(updated);
-    triggerAutoSave(updated);
   };
 
   const copyToClipboard = async (text: string, identifier: string) => {
@@ -156,14 +148,14 @@ export const CandidateNotepad: React.FC<CandidateNotepadProps> = ({ isDrawer = f
     }
   };
 
-  // Criação de novos campos
+  // Adicionar novo campo personalizado
   const handleCreateField = () => {
     if (!newFieldTitle.trim()) return;
     const newSnippet: CustomSnippet = {
       id: `field-${Date.now()}`,
       title: newFieldTitle.trim(),
       content: newFieldContent.trim(),
-      category: newFieldCategory.trim() || 'Geral'
+      category: newFieldCategory.trim() || undefined
     };
     const updated = {
       ...profile,
@@ -173,6 +165,7 @@ export const CandidateNotepad: React.FC<CandidateNotepadProps> = ({ isDrawer = f
     saveImmediately(updated);
     setNewFieldTitle('');
     setNewFieldContent('');
+    setNewFieldCategory('');
     setShowAddFieldModal(false);
   };
 
@@ -181,10 +174,10 @@ export const CandidateNotepad: React.FC<CandidateNotepadProps> = ({ isDrawer = f
     setEditingSnippetId(snippet.id);
     setEditingTitle(snippet.title);
     setEditingContent(snippet.content);
-    setEditingCategory(snippet.category || 'Geral');
+    setEditingCategory(snippet.category || '');
   };
 
-  // Salvar edição de campo
+  // Salvar edição
   const handleSaveEdit = (snippetId: string) => {
     const updatedSnippets = (profile.custom_snippets || []).map(s => {
       if (s.id === snippetId) {
@@ -192,7 +185,7 @@ export const CandidateNotepad: React.FC<CandidateNotepadProps> = ({ isDrawer = f
           ...s,
           title: editingTitle.trim() || s.title,
           content: editingContent,
-          category: editingCategory.trim() || 'Geral'
+          category: editingCategory.trim() || undefined
         };
       }
       return s;
@@ -206,12 +199,7 @@ export const CandidateNotepad: React.FC<CandidateNotepadProps> = ({ isDrawer = f
     setEditingSnippetId(null);
   };
 
-  // Cancelar edição
-  const handleCancelEdit = () => {
-    setEditingSnippetId(null);
-  };
-
-  // Exclusão de campo
+  // Excluir campo
   const handleDeleteField = (snippetId: string) => {
     const updated = {
       ...profile,
@@ -221,7 +209,14 @@ export const CandidateNotepad: React.FC<CandidateNotepadProps> = ({ isDrawer = f
     saveImmediately(updated);
   };
 
-  // Exportar / Importar JSON
+  // Alteração no bloco de notas livre
+  const handleFreeNotesChange = (value: string) => {
+    const updated = { ...profile, free_notes: value };
+    setProfile(updated);
+    triggerAutoSave(updated);
+  };
+
+  // Exportar / Importar Backup JSON
   const handleExportJson = () => {
     const dataStr = 'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(profile, null, 2));
     const downloadAnchor = document.createElement('a');
@@ -239,7 +234,11 @@ export const CandidateNotepad: React.FC<CandidateNotepadProps> = ({ isDrawer = f
     reader.onload = (event) => {
       try {
         const parsed = JSON.parse(event.target?.result as string);
-        const merged = { ...DEFAULT_CANDIDATE_PROFILE, ...parsed };
+        const merged: CandidateProfileData = {
+          ...DEFAULT_CANDIDATE_PROFILE,
+          ...parsed,
+          custom_snippets: Array.isArray(parsed.custom_snippets) ? parsed.custom_snippets : []
+        };
         setProfile(merged);
         saveImmediately(merged);
       } catch (err) {
@@ -250,68 +249,7 @@ export const CandidateNotepad: React.FC<CandidateNotepadProps> = ({ isDrawer = f
     e.target.value = '';
   };
 
-  // Renderizador de campo fixo de templates
-  const renderTemplateField = (
-    label: string, 
-    value: string, 
-    fieldKey: keyof CandidateProfileData, 
-    placeholder: string, 
-    helperText?: string
-  ) => {
-    const isCopied = copiedKey === fieldKey;
-
-    if (searchTerm.trim()) {
-      const term = searchTerm.toLowerCase();
-      const matchLabel = label.toLowerCase().includes(term);
-      const matchVal = (value || '').toLowerCase().includes(term);
-      const matchHelper = (helperText || '').toLowerCase().includes(term);
-      if (!matchLabel && !matchVal && !matchHelper) {
-        return null;
-      }
-    }
-
-    return (
-      <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-3.5 hover:border-slate-700 transition-all flex flex-col gap-2">
-        <div className="flex items-center justify-between gap-2">
-          <label className="text-xs font-semibold text-slate-300">
-            {label}
-          </label>
-          <button
-            type="button"
-            onClick={() => copyToClipboard(value, fieldKey)}
-            disabled={!value}
-            className={`px-2.5 py-1 text-xs font-medium rounded-lg transition-all flex items-center gap-1.5 cursor-pointer shadow-sm ${
-              isCopied
-                ? 'bg-emerald-500 text-slate-950 font-bold scale-105'
-                : value
-                ? 'bg-blue-600 hover:bg-blue-500 text-white active:scale-95'
-                : 'bg-slate-800 text-slate-500 cursor-not-allowed opacity-50'
-            }`}
-            title="Copiar para a área de transferência"
-          >
-            {isCopied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-            <span>{isCopied ? 'Copiado!' : 'Copiar'}</span>
-          </button>
-        </div>
-
-        {helperText && (
-          <p className="text-[11px] text-slate-400 leading-tight">
-            {helperText}
-          </p>
-        )}
-
-        <textarea
-          value={value}
-          onChange={(e) => handleFieldChange(fieldKey, e.target.value)}
-          placeholder={placeholder}
-          rows={4}
-          className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 font-sans leading-relaxed resize-y"
-        />
-      </div>
-    );
-  };
-
-  // Lista de campos filtrados
+  // Filtro de campos por termo de busca
   const filteredSnippets = (profile.custom_snippets || []).filter(snippet => {
     if (!searchTerm.trim()) return true;
     const term = searchTerm.toLowerCase();
@@ -336,30 +274,30 @@ export const CandidateNotepad: React.FC<CandidateNotepadProps> = ({ isDrawer = f
                   Bloco de Notas do Candidato
                 </h1>
                 <span className="text-[10px] font-mono font-bold bg-blue-950 text-blue-400 border border-blue-800 px-2 py-0.5 rounded-full uppercase tracking-wider">
-                  Cópia Rápida 1-Clique
+                  Cópia 1-Clique
                 </span>
               </div>
               <p className="text-xs text-slate-400 mt-0.5">
-                Crie seus próprios campos e copie com 1 clique para preencher vagas. Salva automaticamente no Supabase.
+                Crie seus campos personalizados e anotações. Tudo é gravado automaticamente no Supabase.
               </p>
             </div>
           </div>
         </div>
 
-        {/* Status de Sincronização Automática (Sem botão manual) */}
+        {/* Status de Sincronização Automática com Supabase */}
         <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
-          {/* Badge de Sincronização Automática com Supabase */}
+          {/* Badge em tempo real */}
           <div className={`px-3 py-1.5 text-xs rounded-lg border flex items-center gap-1.5 font-mono shadow-sm ${
             saveStatus.type === 'saved'
-              ? saveStatus.source === 'supabase'
-                ? 'bg-emerald-950/80 border-emerald-800 text-emerald-300'
-                : 'bg-blue-950/80 border-blue-800 text-blue-300'
+              ? 'bg-emerald-950/80 border-emerald-800 text-emerald-300'
               : saveStatus.type === 'saving'
               ? 'bg-amber-950/80 border-amber-800 text-amber-300 animate-pulse'
+              : saveStatus.type === 'warning'
+              ? 'bg-yellow-950/80 border-yellow-800 text-yellow-300'
               : 'bg-rose-950/80 border-rose-800 text-rose-300'
           }`}>
             <Database className="w-3.5 h-3.5" />
-            <span className="truncate max-w-[260px]">{saveStatus.message}</span>
+            <span className="truncate max-w-[280px]">{saveStatus.message}</span>
           </div>
 
           {/* Backup JSON */}
@@ -418,11 +356,11 @@ export const CandidateNotepad: React.FC<CandidateNotepadProps> = ({ isDrawer = f
         </div>
       </div>
 
-      {/* Abas Principais do Bloco de Notas */}
+      {/* Abas: Meus Campos & Bloco de Notas Livre */}
       <div className="px-4 sm:px-6 pt-3 border-b border-slate-800/80 bg-slate-950 flex items-center gap-2 overflow-x-auto scrollbar-none">
         <button
           onClick={() => setActiveSubTab('fields')}
-          className={`px-3.5 py-2 text-xs font-semibold rounded-t-lg transition-colors border-b-2 whitespace-nowrap flex items-center gap-2 ${
+          className={`px-4 py-2 text-xs font-semibold rounded-t-lg transition-colors border-b-2 whitespace-nowrap flex items-center gap-2 ${
             activeSubTab === 'fields'
               ? 'text-blue-400 border-blue-500 bg-slate-900/60'
               : 'text-slate-400 hover:text-slate-200 border-transparent hover:bg-slate-900/30'
@@ -433,34 +371,22 @@ export const CandidateNotepad: React.FC<CandidateNotepadProps> = ({ isDrawer = f
         </button>
 
         <button
-          onClick={() => setActiveSubTab('templates')}
-          className={`px-3.5 py-2 text-xs font-semibold rounded-t-lg transition-colors border-b-2 whitespace-nowrap flex items-center gap-2 ${
-            activeSubTab === 'templates'
-              ? 'text-emerald-400 border-emerald-500 bg-slate-900/60'
-              : 'text-slate-400 hover:text-slate-200 border-transparent hover:bg-slate-900/30'
-          }`}
-        >
-          <Sparkles className="w-3.5 h-3.5 text-emerald-400" />
-          <span>Textos Prontos & Pitches (PT / EN)</span>
-        </button>
-
-        <button
           onClick={() => setActiveSubTab('free_notes')}
-          className={`px-3.5 py-2 text-xs font-semibold rounded-t-lg transition-colors border-b-2 whitespace-nowrap flex items-center gap-2 ${
+          className={`px-4 py-2 text-xs font-semibold rounded-t-lg transition-colors border-b-2 whitespace-nowrap flex items-center gap-2 ${
             activeSubTab === 'free_notes'
               ? 'text-amber-400 border-amber-500 bg-slate-900/60'
               : 'text-slate-400 hover:text-slate-200 border-transparent hover:bg-slate-900/30'
           }`}
         >
           <FileText className="w-3.5 h-3.5 text-amber-400" />
-          <span>Bloco Livre / Rascunhos</span>
+          <span>Bloco de Notas Livre (Caderno)</span>
         </button>
       </div>
 
       {/* Conteúdo Principal */}
       <div className="p-4 sm:p-6 overflow-y-auto flex-1 max-h-[calc(100vh-220px)] space-y-6">
 
-        {/* 1. MEUS CAMPOS & INFORMAÇÕES (Campos Criados pelo Usuário) */}
+        {/* 1. MEUS CAMPOS & INFORMAÇÕES */}
         {activeSubTab === 'fields' && (
           <div className="space-y-4">
             
@@ -471,7 +397,7 @@ export const CandidateNotepad: React.FC<CandidateNotepadProps> = ({ isDrawer = f
                   <span>Campos para Preenchimento de Vagas</span>
                 </h2>
                 <p className="text-xs text-slate-400 mt-0.5">
-                  Crie seus próprios campos (ex: E-mail, Currículo, LinkedIn, Pretensão Salarial, etc.) e copie com 1 clique.
+                  Crie seus próprios campos (ex: E-mail, Celular, LinkedIn, Currículo no Drive, Pretensão USD, Pix, etc.) e copie com 1 clique.
                 </p>
               </div>
 
@@ -485,13 +411,13 @@ export const CandidateNotepad: React.FC<CandidateNotepadProps> = ({ isDrawer = f
               </button>
             </div>
 
-            {/* Formulário de Criação de Novo Campo */}
+            {/* Modal / Formulário de Criação de Novo Campo */}
             {showAddFieldModal && (
               <div className="bg-slate-900 border-2 border-blue-500/50 rounded-xl p-4 sm:p-5 space-y-4 shadow-xl">
                 <div className="flex items-center justify-between">
                   <h3 className="text-xs font-bold text-blue-300 flex items-center gap-1.5 uppercase tracking-wider">
                     <Plus className="w-4 h-4 text-blue-400" />
-                    <span>Adicionar Informação / Campo</span>
+                    <span>Adicionar Novo Campo</span>
                   </h3>
                   <button
                     type="button"
@@ -511,20 +437,20 @@ export const CandidateNotepad: React.FC<CandidateNotepadProps> = ({ isDrawer = f
                       type="text"
                       value={newFieldTitle}
                       onChange={(e) => setNewFieldTitle(e.target.value)}
-                      placeholder="Ex: Meu E-mail Principal, Link do LinkedIn, Link do Currículo, Pretensão..."
+                      placeholder="Ex: Meu E-mail, Link do LinkedIn, Link do Currículo, Pretensão USD, Telefone..."
                       className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:border-blue-500"
                     />
                   </div>
 
                   <div className="space-y-1">
                     <label className="text-[11px] font-semibold text-slate-300">
-                      Categoria (Opcional):
+                      Categoria / Tag (Opcional):
                     </label>
                     <input
                       type="text"
                       value={newFieldCategory}
                       onChange={(e) => setNewFieldCategory(e.target.value)}
-                      placeholder="Ex: Contato, Links, Pagamento..."
+                      placeholder="Ex: Contato, Links, Finanças..."
                       className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:border-blue-500"
                     />
                   </div>
@@ -532,12 +458,12 @@ export const CandidateNotepad: React.FC<CandidateNotepadProps> = ({ isDrawer = f
 
                 <div className="space-y-1">
                   <label className="text-[11px] font-semibold text-slate-300">
-                    Conteúdo / Valor que será copiado em 1 clique:
+                    Conteúdo / Texto que será copiado em 1 clique:
                   </label>
                   <textarea
                     value={newFieldContent}
                     onChange={(e) => setNewFieldContent(e.target.value)}
-                    placeholder="Digite o texto exato que você precisa colar nos formulários..."
+                    placeholder="Cole aqui o texto exato que você precisa preencher nos formulários..."
                     rows={3}
                     className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:border-blue-500 resize-y"
                   />
@@ -557,7 +483,7 @@ export const CandidateNotepad: React.FC<CandidateNotepadProps> = ({ isDrawer = f
                     disabled={!newFieldTitle.trim()}
                     className="px-4 py-2 text-xs font-semibold bg-emerald-500 hover:bg-emerald-400 text-slate-950 rounded-lg transition-colors disabled:opacity-50 font-bold"
                   >
-                    Salvar Campo
+                    Salvar no Supabase
                   </button>
                 </div>
               </div>
@@ -573,7 +499,7 @@ export const CandidateNotepad: React.FC<CandidateNotepadProps> = ({ isDrawer = f
                       Nenhum campo cadastrado ainda
                     </p>
                     <p className="text-xs text-slate-500 max-w-md mx-auto">
-                      Clique no botão <strong>"+ Criar Novo Campo"</strong> acima para adicionar seus dados (como E-mail, LinkedIn, Links de Currículo, Pretensão Salarial ou respostas frequentes).
+                      Clique no botão <strong>"+ Criar Novo Campo"</strong> acima para criar qualquer dado seu (como E-mail, LinkedIn, Link do Currículo, Pretensão Salarial, etc.).
                     </p>
                   </div>
                 </div>
@@ -610,7 +536,7 @@ export const CandidateNotepad: React.FC<CandidateNotepadProps> = ({ isDrawer = f
                         <div className="flex items-center justify-end gap-2">
                           <button
                             type="button"
-                            onClick={handleCancelEdit}
+                            onClick={() => setEditingSnippetId(null)}
                             className="px-2.5 py-1 text-xs text-slate-400 hover:text-white"
                           >
                             Cancelar
@@ -692,84 +618,12 @@ export const CandidateNotepad: React.FC<CandidateNotepadProps> = ({ isDrawer = f
           </div>
         )}
 
-        {/* 2. TEXTOS PRONTOS & PITCHES (PT / EN) */}
-        {activeSubTab === 'templates' && (
-          <div className="space-y-4">
-            <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-xl p-3.5 text-xs text-emerald-300 flex items-start gap-2.5">
-              <Sparkles className="w-4 h-4 mt-0.5 flex-shrink-0 text-emerald-400" />
-              <div>
-                <strong>Textos Longos e Modelos de Resposta:</strong> Personalize suas cartas de apresentação e declarações de experiência. Qualquer alteração feita aqui salva automaticamente no Supabase.
-              </div>
-            </div>
-
-            <div className="space-y-4">
-              {renderTemplateField(
-                'Experiência em IA & Avaliação de Modelos (AI / LLM Experience - EN)', 
-                profile.ai_experience_en, 
-                'ai_experience_en', 
-                'Descreva sua experiência em inglês...', 
-                'Resposta para caixas de texto sobre familiaridade com inteligência artificial, RLHF e anotação.'
-              )}
-
-              {renderTemplateField(
-                'Declaração de Nível de Inglês (English Proficiency Statement - EN)', 
-                profile.english_level_statement, 
-                'english_level_statement', 
-                'Ex: Native Portuguese speaker with C1 advanced written comprehension...', 
-                'Texto para colar quando perguntarem como você lida com diretrizes em inglês.'
-              )}
-
-              {renderTemplateField(
-                'Especificações do Computador & Internet (Hardware & Connection Specs - EN)', 
-                profile.hardware_specs, 
-                'hardware_specs', 
-                'Ex: OS, RAM, Internet speed...', 
-                'Exigido em cadastros de QA, testes e anotação que demandam velocidade de internet.'
-              )}
-
-              {renderTemplateField(
-                'Carta de Apresentação Base em Inglês (Cover Letter - EN)', 
-                profile.cover_letter_en, 
-                'cover_letter_en', 
-                'Dear Hiring Team...', 
-                'Texto completo para colar na caixa "Cover Letter" de plataformas internacionais.'
-              )}
-
-              {renderTemplateField(
-                'Carta de Apresentação Base em Português (Cover Letter - PT)', 
-                profile.cover_letter_pt, 
-                'cover_letter_pt', 
-                'Prezada equipe de recrutamento...', 
-                'Versão para empresas com operação ou times locais no Brasil.'
-              )}
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
-                {renderTemplateField(
-                  'Mini Bio / Resumo Curto em Inglês (Short Bio - EN)', 
-                  profile.short_bio_en, 
-                  'short_bio_en', 
-                  '2-3 frases de apresentação em inglês...', 
-                  'Ideal para campos curtos de perfil com limite de caracteres.'
-                )}
-
-                {renderTemplateField(
-                  'Mini Bio / Resumo Curto em Português (Short Bio - PT)', 
-                  profile.short_bio_pt, 
-                  'short_bio_pt', 
-                  '2-3 frases de apresentação em português...', 
-                  'Ideal para campos curtos em português.'
-                )}
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* 3. BLOCO LIVRE / RASCUNHOS */}
+        {/* 2. BLOCO DE NOTAS LIVRE */}
         {activeSubTab === 'free_notes' && (
           <div className="space-y-4">
             <div className="flex items-center justify-between gap-3">
               <span className="text-xs text-slate-400">
-                Área de anotações livres, rascunhos de testes práticos, diretrizes temporárias e instruções de exames. Salvo automaticamente no Supabase.
+                Área de texto livre: digite ou cole qualquer rascunho, links, resumos ou anotações. Salva automaticamente no Supabase.
               </span>
               <button
                 type="button"
@@ -788,14 +642,14 @@ export const CandidateNotepad: React.FC<CandidateNotepadProps> = ({ isDrawer = f
 
             <textarea
               value={profile.free_notes}
-              onChange={(e) => handleFieldChange('free_notes', e.target.value)}
-              placeholder="Digite aqui anotações livres, resumos de diretrizes de exames, lembretes de prazos, credenciais não sensíveis de plataformas ou respostas em rascunho..."
-              rows={14}
+              onChange={(e) => handleFreeNotesChange(e.target.value)}
+              placeholder="Digite ou cole aqui suas anotações livres, rascunhos de formulários, links úteis ou textos de apoio..."
+              rows={16}
               className="w-full bg-slate-950 border border-slate-800 rounded-xl p-4 text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 font-mono leading-relaxed resize-y"
             />
             <div className="flex items-center justify-between text-[11px] text-slate-500">
               <span>Caracteres: {profile.free_notes?.length || 0} | Palavras: {(profile.free_notes?.trim().split(/\s+/).filter(Boolean) || []).length}</span>
-              {lastSavedTime && <span>Última gravação: {lastSavedTime}</span>}
+              {lastSavedTime && <span>Última gravação no Supabase: {lastSavedTime}</span>}
             </div>
           </div>
         )}
