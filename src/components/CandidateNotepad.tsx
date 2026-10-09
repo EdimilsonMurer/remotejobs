@@ -2,26 +2,20 @@ import React, { useState, useEffect, useRef } from 'react';
 import { 
   Clipboard, 
   Check, 
-  Save, 
   Database, 
   Download, 
   Upload, 
   Sparkles, 
-  User, 
-  Link as LinkIcon, 
-  DollarSign, 
   FileText, 
   BookOpen, 
   Plus, 
   Trash2, 
   Search, 
-  ExternalLink, 
-  CheckCircle2, 
-  AlertCircle,
   HelpCircle,
   X,
-  RefreshCw,
-  Copy
+  Copy,
+  Edit2,
+  Tag
 } from 'lucide-react';
 import { 
   CandidateProfileData, 
@@ -39,22 +33,29 @@ interface CandidateNotepadProps {
 
 export const CandidateNotepad: React.FC<CandidateNotepadProps> = ({ isDrawer = false, onClose }) => {
   const [profile, setProfile] = useState<CandidateProfileData>(DEFAULT_CANDIDATE_PROFILE);
-  const [activeSubTab, setActiveSubTab] = useState<'contact' | 'links' | 'rates' | 'templates' | 'snippets' | 'free_notes'>('contact');
+  const [activeSubTab, setActiveSubTab] = useState<'fields' | 'templates' | 'free_notes'>('fields');
   const [searchTerm, setSearchTerm] = useState('');
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
-  const [isSaving, setIsSaving] = useState(false);
   const [saveStatus, setSaveStatus] = useState<{ type: 'saved' | 'saving' | 'error'; message: string; source: 'supabase' | 'local' }>({
     type: 'saved',
     message: 'Carregando dados...',
     source: 'local'
   });
   const [lastSavedTime, setLastSavedTime] = useState<string>('');
-  const [newSnippetTitle, setNewSnippetTitle] = useState('');
-  const [newSnippetContent, setNewSnippetContent] = useState('');
-  const [showAddSnippet, setShowAddSnippet] = useState(false);
+  
+  // Estado para novo campo
+  const [showAddFieldModal, setShowAddFieldModal] = useState(false);
+  const [newFieldTitle, setNewFieldTitle] = useState('');
+  const [newFieldContent, setNewFieldContent] = useState('');
+  const [newFieldCategory, setNewFieldCategory] = useState('Geral');
+
+  // Estado para edição de campo existente
+  const [editingSnippetId, setEditingSnippetId] = useState<string | null>(null);
+  const [editingTitle, setEditingTitle] = useState('');
+  const [editingContent, setEditingContent] = useState('');
+  const [editingCategory, setEditingCategory] = useState('');
 
   const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
-  const isInitialMount = useRef(true);
 
   // Carrega dados iniciais do Supabase / localStorage
   useEffect(() => {
@@ -81,17 +82,15 @@ export const CandidateNotepad: React.FC<CandidateNotepadProps> = ({ isDrawer = f
     };
   }, []);
 
-  // Autosave com debounce (800ms) quando o usuário digita
+  // Autosave automático no Supabase com debounce (500ms)
   const triggerAutoSave = (updatedProfile: CandidateProfileData) => {
     if (debounceTimerRef.current) {
       clearTimeout(debounceTimerRef.current);
     }
-    setSaveStatus(prev => ({ ...prev, type: 'saving', message: 'Gravando alterações...' }));
+    setSaveStatus(prev => ({ ...prev, type: 'saving', message: 'Gravando no Supabase...' }));
 
     debounceTimerRef.current = setTimeout(async () => {
-      setIsSaving(true);
       const res = await saveCandidateNotesToSupabase(updatedProfile);
-      setIsSaving(false);
       const timeStr = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
       setLastSavedTime(timeStr);
 
@@ -109,23 +108,16 @@ export const CandidateNotepad: React.FC<CandidateNotepadProps> = ({ isDrawer = f
           source: 'local'
         });
       }
-    }, 800);
+    }, 500);
   };
 
-  const handleFieldChange = (field: keyof CandidateProfileData, value: any) => {
-    const updated = { ...profile, [field]: value };
-    setProfile(updated);
-    triggerAutoSave(updated);
-  };
-
-  const handleManualSave = async () => {
+  // Salva imediatamente sem esperar debounce (para inclusões ou exclusões de campos)
+  const saveImmediately = async (updatedProfile: CandidateProfileData) => {
     if (debounceTimerRef.current) {
       clearTimeout(debounceTimerRef.current);
     }
-    setIsSaving(true);
-    setSaveStatus({ type: 'saving', message: 'Gravando no Supabase...', source: 'supabase' });
-    const res = await saveCandidateNotesToSupabase(profile);
-    setIsSaving(false);
+    setSaveStatus(prev => ({ ...prev, type: 'saving', message: 'Gravando no Supabase...' }));
+    const res = await saveCandidateNotesToSupabase(updatedProfile);
     const timeStr = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
     setLastSavedTime(timeStr);
 
@@ -133,16 +125,22 @@ export const CandidateNotepad: React.FC<CandidateNotepadProps> = ({ isDrawer = f
       const isCloud = isSupabaseConfigured();
       setSaveStatus({
         type: 'saved',
-        message: isCloud ? `Salvo no Supabase com sucesso às ${timeStr} ✓` : `Salvo localmente com sucesso`,
+        message: isCloud ? `Gravado no Supabase às ${timeStr} ✓` : `Salvo localmente às ${timeStr}`,
         source: isCloud ? 'supabase' : 'local'
       });
     } else {
       setSaveStatus({
         type: 'error',
-        message: res.error || 'Erro ao salvar no banco',
+        message: res.error || 'Erro ao sincronizar com Supabase',
         source: 'local'
       });
     }
+  };
+
+  const handleFieldChange = (field: keyof CandidateProfileData, value: any) => {
+    const updated = { ...profile, [field]: value };
+    setProfile(updated);
+    triggerAutoSave(updated);
   };
 
   const copyToClipboard = async (text: string, identifier: string) => {
@@ -158,34 +156,72 @@ export const CandidateNotepad: React.FC<CandidateNotepadProps> = ({ isDrawer = f
     }
   };
 
-  // Snippets personalizados
-  const handleAddSnippet = () => {
-    if (!newSnippetTitle.trim()) return;
+  // Criação de novos campos
+  const handleCreateField = () => {
+    if (!newFieldTitle.trim()) return;
     const newSnippet: CustomSnippet = {
-      id: `snippet-${Date.now()}`,
-      title: newSnippetTitle.trim(),
-      content: newSnippetContent.trim()
+      id: `field-${Date.now()}`,
+      title: newFieldTitle.trim(),
+      content: newFieldContent.trim(),
+      category: newFieldCategory.trim() || 'Geral'
     };
     const updated = {
       ...profile,
-      custom_snippets: [...(profile.custom_snippets || []), newSnippet]
+      custom_snippets: [newSnippet, ...(profile.custom_snippets || [])]
     };
     setProfile(updated);
-    triggerAutoSave(updated);
-    setNewSnippetTitle('');
-    setNewSnippetContent('');
-    setShowAddSnippet(false);
+    saveImmediately(updated);
+    setNewFieldTitle('');
+    setNewFieldContent('');
+    setShowAddFieldModal(false);
   };
 
-  const handleDeleteSnippet = (snippetId: string) => {
+  // Iniciar edição de campo
+  const handleStartEdit = (snippet: CustomSnippet) => {
+    setEditingSnippetId(snippet.id);
+    setEditingTitle(snippet.title);
+    setEditingContent(snippet.content);
+    setEditingCategory(snippet.category || 'Geral');
+  };
+
+  // Salvar edição de campo
+  const handleSaveEdit = (snippetId: string) => {
+    const updatedSnippets = (profile.custom_snippets || []).map(s => {
+      if (s.id === snippetId) {
+        return {
+          ...s,
+          title: editingTitle.trim() || s.title,
+          content: editingContent,
+          category: editingCategory.trim() || 'Geral'
+        };
+      }
+      return s;
+    });
+    const updated = {
+      ...profile,
+      custom_snippets: updatedSnippets
+    };
+    setProfile(updated);
+    saveImmediately(updated);
+    setEditingSnippetId(null);
+  };
+
+  // Cancelar edição
+  const handleCancelEdit = () => {
+    setEditingSnippetId(null);
+  };
+
+  // Exclusão de campo
+  const handleDeleteField = (snippetId: string) => {
     const updated = {
       ...profile,
       custom_snippets: (profile.custom_snippets || []).filter(s => s.id !== snippetId)
     };
     setProfile(updated);
-    triggerAutoSave(updated);
+    saveImmediately(updated);
   };
 
+  // Exportar / Importar JSON
   const handleExportJson = () => {
     const dataStr = 'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(profile, null, 2));
     const downloadAnchor = document.createElement('a');
@@ -205,7 +241,7 @@ export const CandidateNotepad: React.FC<CandidateNotepadProps> = ({ isDrawer = f
         const parsed = JSON.parse(event.target?.result as string);
         const merged = { ...DEFAULT_CANDIDATE_PROFILE, ...parsed };
         setProfile(merged);
-        handleManualSave();
+        saveImmediately(merged);
       } catch (err) {
         alert('Arquivo JSON inválido.');
       }
@@ -214,19 +250,16 @@ export const CandidateNotepad: React.FC<CandidateNotepadProps> = ({ isDrawer = f
     e.target.value = '';
   };
 
-  // Renderizador de cada campo com botão de cópia
-  const renderField = (
+  // Renderizador de campo fixo de templates
+  const renderTemplateField = (
     label: string, 
     value: string, 
     fieldKey: keyof CandidateProfileData, 
     placeholder: string, 
-    isMultiline: boolean = false,
-    helperText?: string,
-    isExternalUrl: boolean = false
+    helperText?: string
   ) => {
     const isCopied = copiedKey === fieldKey;
 
-    // Filtro de pesquisa
     if (searchTerm.trim()) {
       const term = searchTerm.toLowerCase();
       const matchLabel = label.toLowerCase().includes(term);
@@ -240,19 +273,8 @@ export const CandidateNotepad: React.FC<CandidateNotepadProps> = ({ isDrawer = f
     return (
       <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-3.5 hover:border-slate-700 transition-all flex flex-col gap-2">
         <div className="flex items-center justify-between gap-2">
-          <label className="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
+          <label className="text-xs font-semibold text-slate-300">
             {label}
-            {isExternalUrl && value && (
-              <a 
-                href={value.startsWith('http') ? value : `https://${value}`} 
-                target="_blank" 
-                rel="noopener noreferrer"
-                className="text-blue-400 hover:text-blue-300 ml-1 inline-flex items-center"
-                title="Abrir link no navegador"
-              >
-                <ExternalLink className="w-3 h-3" />
-              </a>
-            )}
           </label>
           <button
             type="button"
@@ -278,26 +300,25 @@ export const CandidateNotepad: React.FC<CandidateNotepadProps> = ({ isDrawer = f
           </p>
         )}
 
-        {isMultiline ? (
-          <textarea
-            value={value}
-            onChange={(e) => handleFieldChange(fieldKey, e.target.value)}
-            placeholder={placeholder}
-            rows={4}
-            className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 font-sans leading-relaxed resize-y"
-          />
-        ) : (
-          <input
-            type="text"
-            value={value}
-            onChange={(e) => handleFieldChange(fieldKey, e.target.value)}
-            placeholder={placeholder}
-            className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 font-sans"
-          />
-        )}
+        <textarea
+          value={value}
+          onChange={(e) => handleFieldChange(fieldKey, e.target.value)}
+          placeholder={placeholder}
+          rows={4}
+          className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 font-sans leading-relaxed resize-y"
+        />
       </div>
     );
   };
+
+  // Lista de campos filtrados
+  const filteredSnippets = (profile.custom_snippets || []).filter(snippet => {
+    if (!searchTerm.trim()) return true;
+    const term = searchTerm.toLowerCase();
+    return snippet.title.toLowerCase().includes(term) ||
+      snippet.content.toLowerCase().includes(term) ||
+      (snippet.category && snippet.category.toLowerCase().includes(term));
+  });
 
   return (
     <div className={`flex flex-col bg-slate-950 text-slate-100 ${isDrawer ? 'h-full border-l border-slate-800' : 'min-h-[85vh] rounded-2xl border border-slate-800/80 shadow-2xl overflow-hidden'}`}>
@@ -319,16 +340,16 @@ export const CandidateNotepad: React.FC<CandidateNotepadProps> = ({ isDrawer = f
                 </span>
               </div>
               <p className="text-xs text-slate-400 mt-0.5">
-                Centralize suas informações para preencher cadastros de vagas sem precisar procurar no seu computador.
+                Crie seus próprios campos e copie com 1 clique para preencher vagas. Salva automaticamente no Supabase.
               </p>
             </div>
           </div>
         </div>
 
-        {/* Status e Ações de Salvar / Sincronizar */}
+        {/* Status de Sincronização Automática (Sem botão manual) */}
         <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
-          {/* Badge de Sincronização */}
-          <div className={`px-2.5 py-1 text-xs rounded-lg border flex items-center gap-1.5 font-mono ${
+          {/* Badge de Sincronização Automática com Supabase */}
+          <div className={`px-3 py-1.5 text-xs rounded-lg border flex items-center gap-1.5 font-mono shadow-sm ${
             saveStatus.type === 'saved'
               ? saveStatus.source === 'supabase'
                 ? 'bg-emerald-950/80 border-emerald-800 text-emerald-300'
@@ -338,30 +359,20 @@ export const CandidateNotepad: React.FC<CandidateNotepadProps> = ({ isDrawer = f
               : 'bg-rose-950/80 border-rose-800 text-rose-300'
           }`}>
             <Database className="w-3.5 h-3.5" />
-            <span className="truncate max-w-[200px]">{saveStatus.message}</span>
+            <span className="truncate max-w-[260px]">{saveStatus.message}</span>
           </div>
-
-          <button
-            onClick={handleManualSave}
-            disabled={isSaving}
-            className="px-3 py-1.5 text-xs font-semibold bg-emerald-500 hover:bg-emerald-400 text-slate-950 rounded-lg transition-all flex items-center gap-1.5 shadow-sm active:scale-95 disabled:opacity-50 cursor-pointer"
-            title="Gravar agora todas as informações no Supabase"
-          >
-            {isSaving ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
-            <span>{isSaving ? 'Gravando...' : 'Salvar no Supabase'}</span>
-          </button>
 
           {/* Backup JSON */}
           <button
             onClick={handleExportJson}
-            className="p-1.5 text-xs text-slate-400 hover:text-slate-200 bg-slate-800/80 hover:bg-slate-800 rounded-lg border border-slate-700/60 transition-colors"
+            className="p-2 text-xs text-slate-400 hover:text-slate-200 bg-slate-800/80 hover:bg-slate-800 rounded-lg border border-slate-700/60 transition-colors"
             title="Exportar backup em arquivo JSON"
           >
             <Download className="w-4 h-4" />
           </button>
 
           <label 
-            className="p-1.5 text-xs text-slate-400 hover:text-slate-200 bg-slate-800/80 hover:bg-slate-800 rounded-lg border border-slate-700/60 transition-colors cursor-pointer"
+            className="p-2 text-xs text-slate-400 hover:text-slate-200 bg-slate-800/80 hover:bg-slate-800 rounded-lg border border-slate-700/60 transition-colors cursor-pointer"
             title="Importar backup de arquivo JSON"
           >
             <Upload className="w-4 h-4" />
@@ -376,7 +387,7 @@ export const CandidateNotepad: React.FC<CandidateNotepadProps> = ({ isDrawer = f
           {isDrawer && onClose && (
             <button
               onClick={onClose}
-              className="p-1.5 text-slate-400 hover:text-white bg-slate-800 hover:bg-slate-700 rounded-lg"
+              className="p-2 text-slate-400 hover:text-white bg-slate-800 hover:bg-slate-700 rounded-lg"
               title="Fechar"
             >
               <X className="w-4 h-4" />
@@ -393,8 +404,8 @@ export const CandidateNotepad: React.FC<CandidateNotepadProps> = ({ isDrawer = f
             type="text"
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            placeholder="🔍 Filtrar rapidamente qualquer campo ou texto cadastrado..."
-            className="w-full bg-slate-950 border border-slate-800 rounded-lg pl-9 pr-8 py-1.5 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-blue-500"
+            placeholder="🔍 Filtrar rapidamente qualquer campo ou texto..."
+            className="w-full bg-slate-950 border border-slate-800 rounded-lg pl-9 pr-8 py-2 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-blue-500"
           />
           {searchTerm && (
             <button 
@@ -407,47 +418,23 @@ export const CandidateNotepad: React.FC<CandidateNotepadProps> = ({ isDrawer = f
         </div>
       </div>
 
-      {/* Barra de Navegação Interna de Categorias */}
-      <div className="px-4 sm:px-6 pt-3 border-b border-slate-800/80 bg-slate-950 flex items-center gap-1.5 overflow-x-auto scrollbar-none">
+      {/* Abas Principais do Bloco de Notas */}
+      <div className="px-4 sm:px-6 pt-3 border-b border-slate-800/80 bg-slate-950 flex items-center gap-2 overflow-x-auto scrollbar-none">
         <button
-          onClick={() => setActiveSubTab('contact')}
-          className={`px-3 py-2 text-xs font-semibold rounded-t-lg transition-colors border-b-2 whitespace-nowrap flex items-center gap-1.5 ${
-            activeSubTab === 'contact'
+          onClick={() => setActiveSubTab('fields')}
+          className={`px-3.5 py-2 text-xs font-semibold rounded-t-lg transition-colors border-b-2 whitespace-nowrap flex items-center gap-2 ${
+            activeSubTab === 'fields'
               ? 'text-blue-400 border-blue-500 bg-slate-900/60'
               : 'text-slate-400 hover:text-slate-200 border-transparent hover:bg-slate-900/30'
           }`}
         >
-          <User className="w-3.5 h-3.5" />
-          <span>Dados Pessoais & Contato</span>
-        </button>
-
-        <button
-          onClick={() => setActiveSubTab('links')}
-          className={`px-3 py-2 text-xs font-semibold rounded-t-lg transition-colors border-b-2 whitespace-nowrap flex items-center gap-1.5 ${
-            activeSubTab === 'links'
-              ? 'text-blue-400 border-blue-500 bg-slate-900/60'
-              : 'text-slate-400 hover:text-slate-200 border-transparent hover:bg-slate-900/30'
-          }`}
-        >
-          <LinkIcon className="w-3.5 h-3.5" />
-          <span>Links & Currículo (PDF/Drive)</span>
-        </button>
-
-        <button
-          onClick={() => setActiveSubTab('rates')}
-          className={`px-3 py-2 text-xs font-semibold rounded-t-lg transition-colors border-b-2 whitespace-nowrap flex items-center gap-1.5 ${
-            activeSubTab === 'rates'
-              ? 'text-blue-400 border-blue-500 bg-slate-900/60'
-              : 'text-slate-400 hover:text-slate-200 border-transparent hover:bg-slate-900/30'
-          }`}
-        >
-          <DollarSign className="w-3.5 h-3.5" />
-          <span>Valores, Horas & Pagamentos</span>
+          <BookOpen className="w-3.5 h-3.5 text-blue-400" />
+          <span>Meus Campos & Informações ({profile.custom_snippets?.length || 0})</span>
         </button>
 
         <button
           onClick={() => setActiveSubTab('templates')}
-          className={`px-3 py-2 text-xs font-semibold rounded-t-lg transition-colors border-b-2 whitespace-nowrap flex items-center gap-1.5 ${
+          className={`px-3.5 py-2 text-xs font-semibold rounded-t-lg transition-colors border-b-2 whitespace-nowrap flex items-center gap-2 ${
             activeSubTab === 'templates'
               ? 'text-emerald-400 border-emerald-500 bg-slate-900/60'
               : 'text-slate-400 hover:text-slate-200 border-transparent hover:bg-slate-900/30'
@@ -458,20 +445,8 @@ export const CandidateNotepad: React.FC<CandidateNotepadProps> = ({ isDrawer = f
         </button>
 
         <button
-          onClick={() => setActiveSubTab('snippets')}
-          className={`px-3 py-2 text-xs font-semibold rounded-t-lg transition-colors border-b-2 whitespace-nowrap flex items-center gap-1.5 ${
-            activeSubTab === 'snippets'
-              ? 'text-purple-400 border-purple-500 bg-slate-900/60'
-              : 'text-slate-400 hover:text-slate-200 border-transparent hover:bg-slate-900/30'
-          }`}
-        >
-          <BookOpen className="w-3.5 h-3.5 text-purple-400" />
-          <span>Snippets Personalizados ({profile.custom_snippets?.length || 0})</span>
-        </button>
-
-        <button
           onClick={() => setActiveSubTab('free_notes')}
-          className={`px-3 py-2 text-xs font-semibold rounded-t-lg transition-colors border-b-2 whitespace-nowrap flex items-center gap-1.5 ${
+          className={`px-3.5 py-2 text-xs font-semibold rounded-t-lg transition-colors border-b-2 whitespace-nowrap flex items-center gap-2 ${
             activeSubTab === 'free_notes'
               ? 'text-amber-400 border-amber-500 bg-slate-900/60'
               : 'text-slate-400 hover:text-slate-200 border-transparent hover:bg-slate-900/30'
@@ -482,147 +457,306 @@ export const CandidateNotepad: React.FC<CandidateNotepadProps> = ({ isDrawer = f
         </button>
       </div>
 
-      {/* Conteúdo Principal do Formulário */}
+      {/* Conteúdo Principal */}
       <div className="p-4 sm:p-6 overflow-y-auto flex-1 max-h-[calc(100vh-220px)] space-y-6">
 
-        {/* 1. DADOS PESSOAIS & CONTATO */}
-        {activeSubTab === 'contact' && (
+        {/* 1. MEUS CAMPOS & INFORMAÇÕES (Campos Criados pelo Usuário) */}
+        {activeSubTab === 'fields' && (
           <div className="space-y-4">
-            <div className="bg-blue-500/10 border border-blue-500/20 rounded-xl p-3.5 text-xs text-blue-300 flex items-start gap-2.5">
-              <HelpCircle className="w-4 h-4 mt-0.5 flex-shrink-0 text-blue-400" />
+            
+            {/* Header da Seção de Campos com Botão de Criar Campo */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-slate-900/60 border border-slate-800 p-4 rounded-xl">
               <div>
-                <strong>Dica de Produtividade:</strong> Formulários como Lever, Greenhouse, Workable e portais de IA sempre solicitam esses dados. Clique no botão azul <strong>"Copiar"</strong> de qualquer campo e cole direto no formulário com <code>Ctrl+V</code>.
+                <h2 className="text-sm font-bold text-white flex items-center gap-2">
+                  <span>Campos para Preenchimento de Vagas</span>
+                </h2>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  Crie seus próprios campos (ex: E-mail, Currículo, LinkedIn, Pretensão Salarial, etc.) e copie com 1 clique.
+                </p>
               </div>
+
+              <button
+                type="button"
+                onClick={() => setShowAddFieldModal(!showAddFieldModal)}
+                className="px-4 py-2 text-xs font-semibold bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-all flex items-center justify-center gap-2 shadow-sm active:scale-95 cursor-pointer whitespace-nowrap"
+              >
+                <Plus className="w-4 h-4" />
+                <span>+ Criar Novo Campo</span>
+              </button>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
-              {renderField('Nome Completo (Full Name)', profile.full_name, 'full_name', 'Ex: Carlos Silva')}
-              {renderField('E-mail Principal', profile.email, 'email', 'Ex: seu.email@gmail.com')}
-              {renderField('Telefone / WhatsApp (Phone with Country Code)', profile.phone, 'phone', 'Ex: +55 11 98765-4321', false, 'Inclua sempre o código internacional (+55)')}
-              {renderField('Fuso Horário (Timezone)', profile.timezone, 'timezone', 'Ex: America/Sao_Paulo (UTC-3)', false, 'Garante agendamento no horário correto')}
-              {renderField('Cidade (City)', profile.city, 'city', 'Ex: São Paulo / Curitiba')}
-              {renderField('Estado / Região (State/Province)', profile.state, 'state', 'Ex: SP / PR / RJ')}
-              {renderField('País (Country)', profile.country, 'country', 'Ex: Brasil / Brazil')}
-              {renderField('CPF / ID Fiscal (Tax ID / SSN alternative)', profile.tax_id, 'tax_id', 'Ex: 123.456.789-00', false, 'Para contratos, faturamento ou verificação de identidade')}
+            {/* Formulário de Criação de Novo Campo */}
+            {showAddFieldModal && (
+              <div className="bg-slate-900 border-2 border-blue-500/50 rounded-xl p-4 sm:p-5 space-y-4 shadow-xl">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-xs font-bold text-blue-300 flex items-center gap-1.5 uppercase tracking-wider">
+                    <Plus className="w-4 h-4 text-blue-400" />
+                    <span>Adicionar Informação / Campo</span>
+                  </h3>
+                  <button
+                    type="button"
+                    onClick={() => setShowAddFieldModal(false)}
+                    className="text-slate-400 hover:text-white"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div className="sm:col-span-2 space-y-1">
+                    <label className="text-[11px] font-semibold text-slate-300">
+                      Nome / Título do Campo:
+                    </label>
+                    <input
+                      type="text"
+                      value={newFieldTitle}
+                      onChange={(e) => setNewFieldTitle(e.target.value)}
+                      placeholder="Ex: Meu E-mail Principal, Link do LinkedIn, Link do Currículo, Pretensão..."
+                      className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:border-blue-500"
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-[11px] font-semibold text-slate-300">
+                      Categoria (Opcional):
+                    </label>
+                    <input
+                      type="text"
+                      value={newFieldCategory}
+                      onChange={(e) => setNewFieldCategory(e.target.value)}
+                      placeholder="Ex: Contato, Links, Pagamento..."
+                      className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:border-blue-500"
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[11px] font-semibold text-slate-300">
+                    Conteúdo / Valor que será copiado em 1 clique:
+                  </label>
+                  <textarea
+                    value={newFieldContent}
+                    onChange={(e) => setNewFieldContent(e.target.value)}
+                    placeholder="Digite o texto exato que você precisa colar nos formulários..."
+                    rows={3}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:border-blue-500 resize-y"
+                  />
+                </div>
+
+                <div className="flex items-center justify-end gap-2 pt-1 border-t border-slate-800">
+                  <button
+                    type="button"
+                    onClick={() => setShowAddFieldModal(false)}
+                    className="px-3 py-1.5 text-xs text-slate-400 hover:text-white"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleCreateField}
+                    disabled={!newFieldTitle.trim()}
+                    className="px-4 py-2 text-xs font-semibold bg-emerald-500 hover:bg-emerald-400 text-slate-950 rounded-lg transition-colors disabled:opacity-50 font-bold"
+                  >
+                    Salvar Campo
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Lista dos Campos Criados */}
+            <div className="grid grid-cols-1 gap-3.5">
+              {filteredSnippets.length === 0 ? (
+                <div className="text-center py-12 px-4 bg-slate-900/40 border border-dashed border-slate-800 rounded-2xl space-y-3">
+                  <BookOpen className="w-8 h-8 text-slate-600 mx-auto" />
+                  <div className="space-y-1">
+                    <p className="text-sm font-semibold text-slate-300">
+                      Nenhum campo cadastrado ainda
+                    </p>
+                    <p className="text-xs text-slate-500 max-w-md mx-auto">
+                      Clique no botão <strong>"+ Criar Novo Campo"</strong> acima para adicionar seus dados (como E-mail, LinkedIn, Links de Currículo, Pretensão Salarial ou respostas frequentes).
+                    </p>
+                  </div>
+                </div>
+              ) : (
+                filteredSnippets.map((snippet) => {
+                  const isCopied = copiedKey === snippet.id;
+                  const isEditing = editingSnippetId === snippet.id;
+
+                  if (isEditing) {
+                    return (
+                      <div key={snippet.id} className="bg-slate-900 border-2 border-blue-500/60 rounded-xl p-4 space-y-3">
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                          <input
+                            type="text"
+                            value={editingTitle}
+                            onChange={(e) => setEditingTitle(e.target.value)}
+                            placeholder="Nome do campo..."
+                            className="sm:col-span-2 bg-slate-950 border border-slate-800 rounded px-2.5 py-1.5 text-xs text-slate-200"
+                          />
+                          <input
+                            type="text"
+                            value={editingCategory}
+                            onChange={(e) => setEditingCategory(e.target.value)}
+                            placeholder="Categoria..."
+                            className="bg-slate-950 border border-slate-800 rounded px-2.5 py-1.5 text-xs text-slate-200"
+                          />
+                        </div>
+                        <textarea
+                          value={editingContent}
+                          onChange={(e) => setEditingContent(e.target.value)}
+                          rows={3}
+                          className="w-full bg-slate-950 border border-slate-800 rounded p-2 text-xs text-slate-200"
+                        />
+                        <div className="flex items-center justify-end gap-2">
+                          <button
+                            type="button"
+                            onClick={handleCancelEdit}
+                            className="px-2.5 py-1 text-xs text-slate-400 hover:text-white"
+                          >
+                            Cancelar
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleSaveEdit(snippet.id)}
+                            className="px-3 py-1 text-xs font-semibold bg-emerald-500 text-slate-950 rounded"
+                          >
+                            Salvar Alterações
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <div 
+                      key={snippet.id} 
+                      className="bg-slate-900/80 border border-slate-800 rounded-xl p-4 hover:border-slate-700 transition-all flex flex-col gap-2.5"
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-xs font-bold text-slate-200">
+                            {snippet.title}
+                          </span>
+                          {snippet.category && (
+                            <span className="text-[10px] font-mono bg-slate-800 text-slate-400 px-2 py-0.5 rounded border border-slate-700">
+                              {snippet.category}
+                            </span>
+                          )}
+                        </div>
+
+                        {/* Ações: Copiar, Editar, Excluir */}
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => copyToClipboard(snippet.content, snippet.id)}
+                            className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-all flex items-center gap-1.5 cursor-pointer shadow-sm ${
+                              isCopied
+                                ? 'bg-emerald-500 text-slate-950 font-bold scale-105'
+                                : 'bg-blue-600 hover:bg-blue-500 text-white active:scale-95'
+                            }`}
+                            title="Copiar para a área de transferência"
+                          >
+                            {isCopied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                            <span>{isCopied ? 'Copiado!' : 'Copiar'}</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => handleStartEdit(snippet)}
+                            className="p-1.5 text-slate-400 hover:text-blue-400 hover:bg-slate-800 rounded-lg transition-colors"
+                            title="Editar este campo"
+                          >
+                            <Edit2 className="w-3.5 h-3.5" />
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteField(snippet.id)}
+                            className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-slate-800 rounded-lg transition-colors"
+                            title="Excluir este campo"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="bg-slate-950 border border-slate-800/80 rounded-lg p-3 text-xs text-slate-300 whitespace-pre-wrap font-sans leading-relaxed select-all">
+                        {snippet.content}
+                      </div>
+                    </div>
+                  );
+                })
+              )}
             </div>
+
           </div>
         )}
 
-        {/* 2. LINKS & CURRÍCULO */}
-        {activeSubTab === 'links' && (
-          <div className="space-y-4">
-            <div className="bg-slate-900 border border-slate-800 rounded-xl p-3.5 text-xs text-slate-300 flex items-start gap-2.5">
-              <LinkIcon className="w-4 h-4 mt-0.5 flex-shrink-0 text-blue-400" />
-              <div>
-                Mantenha aqui os links diretos para seu currículo (Google Drive ou Dropbox com permissão de visualização pública) e perfis profissionais.
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
-              {renderField('LinkedIn URL', profile.linkedin_url, 'linkedin_url', 'Ex: https://linkedin.com/in/seuperfil', false, 'Perfil atualizado em inglês ou português', true)}
-              {renderField('GitHub / Portfólio / Website', profile.github_url, 'github_url', 'Ex: https://github.com/seuperfil', false, 'Para vagas técnicas ou portfólio', true)}
-              {renderField('Link do Currículo em PDF (Google Drive / Nuvem)', profile.resume_url, 'resume_url', 'Ex: https://drive.google.com/file/d/...', false, 'Certifique-se de que o link está como "Qualquer pessoa com o link pode ver"', true)}
-              {renderField('Link do Currículo em INGLÊS (English Resume)', profile.resume_en_url, 'resume_en_url', 'Ex: https://drive.google.com/file/d/...', false, 'Versão recomendada para empresas internacionais', true)}
-              {renderField('Portfólio / Outros Trabalhos (Portfolio Link)', profile.portfolio_url, 'portfolio_url', 'Ex: https://meuportfolio.com', false, 'Amostras de escrita, tradução ou código', true)}
-            </div>
-          </div>
-        )}
-
-        {/* 3. VALORES, HORAS & PAGAMENTOS */}
-        {activeSubTab === 'rates' && (
-          <div className="space-y-4">
-            <div className="bg-slate-900 border border-slate-800 rounded-xl p-3.5 text-xs text-slate-300 flex items-start gap-2.5">
-              <DollarSign className="w-4 h-4 mt-0.5 flex-shrink-0 text-emerald-400" />
-              <div>
-                Facilite a resposta para os campos obrigatórios de pretensão salarial e contas de recebimento internacional.
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
-              {renderField('Pretensão / Taxa Horária em USD (Hourly Rate)', profile.hourly_rate_usd, 'hourly_rate_usd', 'Ex: $15.00/h ou $20.00/hour', false, 'Valor por hora pedido em formulários')}
-              {renderField('Pretensão Mensal em USD (Expected Monthly Salary)', profile.monthly_salary_usd, 'monthly_salary_usd', 'Ex: $2,500.00/month', false, 'Para contratos de dedicação integral')}
-              {renderField('Disponibilidade de Início (Availability / Notice Period)', profile.availability, 'availability', 'Ex: Immediate / Imediata / 2 weeks', false, 'Frequentemente perguntado em formulários internacionais')}
-              {renderField('Horas por Semana (Weekly Availability)', profile.hours_per_week, 'hours_per_week', 'Ex: 20-40 hours/week / Full-time (40h)', false, 'Carga horária que você pode dedicar')}
-              {renderField('E-mail da Conta PayPal', profile.payment_paypal, 'payment_paypal', 'Ex: pagamentos@gmail.com', false, 'Utilizado pela Outlier, DataAnnotation, etc.')}
-              {renderField('E-mail / ID Payoneer', profile.payment_payoneer, 'payment_payoneer', 'Ex: payoneer.user@gmail.com', false, 'Utilizado por OneForma, Clickworker, RWS')}
-              {renderField('Conta Deel / E-mail Deel', profile.payment_deel, 'payment_deel', 'Ex: seu.deel@gmail.com', false, 'Utilizado por Alignerr')}
-              {renderField('Conta Wise (E-mail ou Chave)', profile.payment_wise, 'payment_wise', 'Ex: wise.account@gmail.com', false, 'Para transferências diretas em moeda estrangeira')}
-            </div>
-          </div>
-        )}
-
-        {/* 4. TEXTOS PRONTOS & PITCHES (PT / EN) */}
+        {/* 2. TEXTOS PRONTOS & PITCHES (PT / EN) */}
         {activeSubTab === 'templates' && (
           <div className="space-y-4">
             <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-xl p-3.5 text-xs text-emerald-300 flex items-start gap-2.5">
               <Sparkles className="w-4 h-4 mt-0.5 flex-shrink-0 text-emerald-400" />
               <div>
-                <strong>Textos Otimizados para Formulários Internacionais:</strong> Modelos prontos em inglês e português para perguntas frequentes como "Describe your experience", "Cover letter" e "Hardware requirements".
+                <strong>Textos Longos e Modelos de Resposta:</strong> Personalize suas cartas de apresentação e declarações de experiência. Qualquer alteração feita aqui salva automaticamente no Supabase.
               </div>
             </div>
 
             <div className="space-y-4">
-              {renderField(
+              {renderTemplateField(
                 'Experiência em IA & Avaliação de Modelos (AI / LLM Experience - EN)', 
                 profile.ai_experience_en, 
                 'ai_experience_en', 
                 'Descreva sua experiência em inglês...', 
-                true, 
-                'Excelente resposta para caixas de texto sobre familiaridade com inteligência artificial, RLHF e anotação.'
+                'Resposta para caixas de texto sobre familiaridade com inteligência artificial, RLHF e anotação.'
               )}
 
-              {renderField(
+              {renderTemplateField(
                 'Declaração de Nível de Inglês (English Proficiency Statement - EN)', 
                 profile.english_level_statement, 
                 'english_level_statement', 
                 'Ex: Native Portuguese speaker with C1 advanced written comprehension...', 
-                true, 
                 'Texto para colar quando perguntarem como você lida com diretrizes em inglês.'
               )}
 
-              {renderField(
+              {renderTemplateField(
                 'Especificações do Computador & Internet (Hardware & Connection Specs - EN)', 
                 profile.hardware_specs, 
                 'hardware_specs', 
                 'Ex: OS, RAM, Internet speed...', 
-                true, 
-                'Exigido em cadastros de QA, testes e anotação que demandam velocidade de internet comprovada.'
+                'Exigido em cadastros de QA, testes e anotação que demandam velocidade de internet.'
               )}
 
-              {renderField(
+              {renderTemplateField(
                 'Carta de Apresentação Base em Inglês (Cover Letter - EN)', 
                 profile.cover_letter_en, 
                 'cover_letter_en', 
                 'Dear Hiring Team...', 
-                true, 
                 'Texto completo para colar na caixa "Cover Letter" de plataformas internacionais.'
               )}
 
-              {renderField(
+              {renderTemplateField(
                 'Carta de Apresentação Base em Português (Cover Letter - PT)', 
                 profile.cover_letter_pt, 
                 'cover_letter_pt', 
                 'Prezada equipe de recrutamento...', 
-                true, 
                 'Versão para empresas com operação ou times locais no Brasil.'
               )}
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
-                {renderField(
+                {renderTemplateField(
                   'Mini Bio / Resumo Curto em Inglês (Short Bio - EN)', 
                   profile.short_bio_en, 
                   'short_bio_en', 
                   '2-3 frases de apresentação em inglês...', 
-                  true, 
                   'Ideal para campos curtos de perfil com limite de caracteres.'
                 )}
 
-                {renderField(
+                {renderTemplateField(
                   'Mini Bio / Resumo Curto em Português (Short Bio - PT)', 
                   profile.short_bio_pt, 
                   'short_bio_pt', 
                   '2-3 frases de apresentação em português...', 
-                  true, 
                   'Ideal para campos curtos em português.'
                 )}
               </div>
@@ -630,111 +764,7 @@ export const CandidateNotepad: React.FC<CandidateNotepadProps> = ({ isDrawer = f
           </div>
         )}
 
-        {/* 5. SNIPPETS PERSONALIZADOS */}
-        {activeSubTab === 'snippets' && (
-          <div className="space-y-4">
-            <div className="flex items-center justify-between gap-3">
-              <p className="text-xs text-slate-400">
-                Crie seus próprios blocos de texto com perguntas específicas que você encontra com frequência nos formulários.
-              </p>
-              <button
-                onClick={() => setShowAddSnippet(!showAddSnippet)}
-                className="px-3 py-1.5 text-xs font-semibold bg-purple-600 hover:bg-purple-500 text-white rounded-lg transition-colors flex items-center gap-1.5 cursor-pointer shadow-sm"
-              >
-                <Plus className="w-3.5 h-3.5" />
-                <span>Novo Snippet</span>
-              </button>
-            </div>
-
-            {showAddSnippet && (
-              <div className="bg-slate-900 border border-purple-500/40 rounded-xl p-4 space-y-3">
-                <h3 className="text-xs font-bold text-purple-300">Criar Novo Snippet de Resposta</h3>
-                <input
-                  type="text"
-                  value={newSnippetTitle}
-                  onChange={(e) => setNewSnippetTitle(e.target.value)}
-                  placeholder="Título (ex: 'Link do Loom de Apresentação' ou 'Graduação')"
-                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:border-purple-500"
-                />
-                <textarea
-                  value={newSnippetContent}
-                  onChange={(e) => setNewSnippetContent(e.target.value)}
-                  placeholder="Conteúdo que será copiado em 1 clique..."
-                  rows={3}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:border-purple-500 resize-y"
-                />
-                <div className="flex items-center justify-end gap-2">
-                  <button
-                    onClick={() => setShowAddSnippet(false)}
-                    className="px-3 py-1.5 text-xs text-slate-400 hover:text-white"
-                  >
-                    Cancelar
-                  </button>
-                  <button
-                    onClick={handleAddSnippet}
-                    disabled={!newSnippetTitle.trim()}
-                    className="px-3.5 py-1.5 text-xs font-semibold bg-purple-600 hover:bg-purple-500 text-white rounded-lg disabled:opacity-50"
-                  >
-                    Salvar Snippet
-                  </button>
-                </div>
-              </div>
-            )}
-
-            <div className="grid grid-cols-1 gap-3.5">
-              {(profile.custom_snippets || []).length === 0 ? (
-                <div className="text-center py-8 text-xs text-slate-500 border border-dashed border-slate-800 rounded-xl">
-                  Nenhum snippet personalizado criado ainda. Clique em "Novo Snippet" acima para adicionar.
-                </div>
-              ) : (
-                (profile.custom_snippets || []).map((snippet) => {
-                  const isCopied = copiedKey === snippet.id;
-                  if (searchTerm.trim()) {
-                    const term = searchTerm.toLowerCase();
-                    if (!snippet.title.toLowerCase().includes(term) && !snippet.content.toLowerCase().includes(term)) {
-                      return null;
-                    }
-                  }
-                  return (
-                    <div key={snippet.id} className="bg-slate-900/80 border border-slate-800 rounded-xl p-3.5 hover:border-slate-700 transition-all flex flex-col gap-2">
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="text-xs font-semibold text-purple-300">
-                          {snippet.title}
-                        </span>
-                        <div className="flex items-center gap-1.5">
-                          <button
-                            type="button"
-                            onClick={() => copyToClipboard(snippet.content, snippet.id)}
-                            className={`px-2.5 py-1 text-xs font-medium rounded-lg transition-all flex items-center gap-1.5 cursor-pointer shadow-sm ${
-                              isCopied
-                                ? 'bg-emerald-500 text-slate-950 font-bold scale-105'
-                                : 'bg-purple-600 hover:bg-purple-500 text-white active:scale-95'
-                            }`}
-                          >
-                            {isCopied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-                            <span>{isCopied ? 'Copiado!' : 'Copiar'}</span>
-                          </button>
-                          <button
-                            onClick={() => handleDeleteSnippet(snippet.id)}
-                            className="p-1 text-slate-500 hover:text-rose-400 rounded transition-colors"
-                            title="Excluir Snippet"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      </div>
-                      <p className="text-xs text-slate-300 whitespace-pre-wrap font-sans bg-slate-950 p-2.5 rounded-lg border border-slate-800/80">
-                        {snippet.content}
-                      </p>
-                    </div>
-                  );
-                })
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* 6. BLOCO LIVRE / RASCUNHOS */}
+        {/* 3. BLOCO LIVRE / RASCUNHOS */}
         {activeSubTab === 'free_notes' && (
           <div className="space-y-4">
             <div className="flex items-center justify-between gap-3">
@@ -742,6 +772,7 @@ export const CandidateNotepad: React.FC<CandidateNotepadProps> = ({ isDrawer = f
                 Área de anotações livres, rascunhos de testes práticos, diretrizes temporárias e instruções de exames. Salvo automaticamente no Supabase.
               </span>
               <button
+                type="button"
                 onClick={() => copyToClipboard(profile.free_notes, 'free_notes')}
                 disabled={!profile.free_notes}
                 className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-all flex items-center gap-1.5 cursor-pointer ${
