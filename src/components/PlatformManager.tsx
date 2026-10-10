@@ -21,13 +21,10 @@ import {
   CheckSquare,
   HelpCircle,
   Database,
-  RefreshCw,
-  AlertCircle,
   X
 } from 'lucide-react';
 import { Platform, PlatformStatus, CurrencyType, UserAccountStatus } from '../types/job';
 import { isSupabaseConfigured } from '../lib/supabase/client';
-import { syncAllPlatformsToSupabase } from '../lib/supabase/platforms';
 
 interface PlatformManagerProps {
   platforms: Platform[];
@@ -104,26 +101,6 @@ export const PlatformManager: React.FC<PlatformManagerProps> = ({
   const [searchQuery, setSearchQuery] = useState('');
   const [currencyFilter, setCurrencyFilter] = useState<'ALL' | CurrencyType>('ALL');
   const [quickUrl, setQuickUrl] = useState('');
-  const [isSyncingSupabase, setIsSyncingSupabase] = useState(false);
-  const [syncFeedback, setSyncFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
-
-  const handleSyncSupabase = async () => {
-    setIsSyncingSupabase(true);
-    setSyncFeedback(null);
-    try {
-      const res = await syncAllPlatformsToSupabase(platforms);
-      if (res.success) {
-        setSyncFeedback({ type: 'success', message: res.message });
-      } else {
-        setSyncFeedback({ type: 'error', message: res.message });
-      }
-    } catch (err: any) {
-      setSyncFeedback({ type: 'error', message: err.message || 'Erro ao sincronizar com o Supabase' });
-    } finally {
-      setIsSyncingSupabase(false);
-      setTimeout(() => setSyncFeedback(null), 8000);
-    }
-  };
 
   const handleQuickSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -372,45 +349,11 @@ export const PlatformManager: React.FC<PlatformManagerProps> = ({
               <Plus className="w-3.5 h-3.5" />
               <span>Nova</span>
             </button>
-
-            <button
-              onClick={handleSyncSupabase}
-              disabled={isSyncingSupabase}
-              className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-xs font-semibold rounded-lg flex items-center gap-1.5 transition-colors shadow-sm cursor-pointer"
-              title="Grava e sincroniza todas as plataformas cadastradas no seu banco Supabase"
-            >
-              <RefreshCw className={`w-3.5 h-3.5 ${isSyncingSupabase ? 'animate-spin' : ''}`} />
-              <span>{isSyncingSupabase ? 'Gravando...' : 'Gravar no Supabase'}</span>
-            </button>
           </div>
 
         </div>
 
       </div>
-
-      {/* Sync Feedback Banner */}
-      {syncFeedback && (
-        <div className={`p-4 rounded-xl border flex items-center justify-between gap-3 text-xs font-semibold animate-in fade-in ${
-          syncFeedback.type === 'success' 
-            ? 'bg-emerald-950/90 border-emerald-500 text-emerald-200' 
-            : 'bg-rose-950/90 border-rose-600 text-rose-200'
-        }`}>
-          <div className="flex items-center gap-2">
-            {syncFeedback.type === 'success' ? (
-              <CheckCircle2 className="w-4.5 h-4.5 text-emerald-400 shrink-0" />
-            ) : (
-              <AlertCircle className="w-4.5 h-4.5 text-rose-400 shrink-0" />
-            )}
-            <span>{syncFeedback.message}</span>
-          </div>
-          <button
-            onClick={() => setSyncFeedback(null)}
-            className="text-slate-400 hover:text-white p-1 rounded-md cursor-pointer"
-          >
-            <X className="w-4 h-4" />
-          </button>
-        </div>
-      )}
 
       {/* Platforms Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">

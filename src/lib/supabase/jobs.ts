@@ -228,7 +228,7 @@ export async function loadJobsFromSupabase(): Promise<{
 
     let latestUpdateIso: string | null = null;
     for (const j of (jobsRows as any[])) {
-      const ts = j.updated_at || j.first_seen_at || j.published_at;
+      const ts = j.last_seen_at || j.updated_at || j.first_seen_at || j.published_at;
       if (ts) {
         if (!latestUpdateIso || new Date(ts).getTime() > new Date(latestUpdateIso).getTime()) {
           latestUpdateIso = ts;

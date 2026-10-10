@@ -9,6 +9,8 @@ import { WelocalizeConnector } from './src/connectors/welocalize';
 import { TuringConnector } from './src/connectors/turing';
 import { ConnectorRegistry } from './src/connectors/registry';
 import seedAllHandler from './api/supabase/seed-all.ts';
+import cronHandler from './api/cron.ts';
+import healthHandler from './api/health.ts';
 
 dotenv.config();
 
@@ -300,6 +302,16 @@ ANALISE A PLATFORMA E RETORNE EXATAMENTE O OBJETO JSON com as seguintes regras:
   // Rota de semeadura e sincronização em massa no Supabase
   app.all('/api/supabase/seed-all', async (req, res) => {
     return seedAllHandler(req, res);
+  });
+
+  // Rota do Cron Job (Vercel Cron & Disparo Manual)
+  app.all('/api/cron', async (req, res) => {
+    return cronHandler(req, res);
+  });
+
+  // Rota de Health Check
+  app.get('/api/health', (req, res) => {
+    return healthHandler(req, res);
   });
 
   // Rota de tradução com Gemini para Português

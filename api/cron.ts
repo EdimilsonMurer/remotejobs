@@ -5,8 +5,11 @@ import { GeminiClassifier } from '../src/pipeline/gemini-classifier';
 import { getSupabaseServerClient } from '../src/lib/supabase/server';
 import { generateDescriptionHash } from '../src/pipeline/hasher';
 
+export const maxDuration = 60;
+
 export default async function handler(req: any, res: any) {
   const startTime = Date.now();
+  const nowIso = new Date().toISOString();
   console.log('[API Cron] Iniciando ciclo de ingestão automatizada no backend...');
 
   try {
@@ -52,11 +55,18 @@ export default async function handler(req: any, res: any) {
 
     // 2. Coleta de todas as plataformas registradas
     for (const connector of connectors) {
+      // Proteção de timeout para Vercel Serverless (limite de segurança de 48s)
+      if (Date.now() - startTime > 48000) {
+        console.warn(`[API Cron] Limite de tempo próximo, finalizando ciclo para salvar resultados.`);
+        break;
+      }
+
       const cStart = Date.now();
       let connectorFound = 0;
       let connectorNew = 0;
       let connectorUpdated = 0;
       let connectorAnalyzed = 0;
+      const matchedJobIdsToTouch: string[] = [];
 
       try {
         const jobs = await connector.collect();
@@ -64,17 +74,19 @@ export default async function handler(req: any, res: any) {
         totalFound += jobs.length;
 
         for (const job of jobs) {
+          // Checagem de tempo interno
+          if (Date.now() - startTime > 50000) {
+            break;
+          }
+
           const decision = deduplicator.evaluate(job);
 
-          // Se a vaga já existe sem alteração, apenas atualiza last_seen_at no Supabase
+          // Se a vaga já existe sem alteração, agrupa para atualizar em lote
           if (decision.action === 'UPDATE_LAST_SEEN') {
             connectorUpdated++;
             totalUpdated++;
-            if (supabaseClient && decision.matched_job_id) {
-              await supabaseClient
-                .from('jobs')
-                .update({ last_seen_at: new Date().toISOString(), status: 'ACTIVE' })
-                .eq('id', decision.matched_job_id);
+            if (decision.matched_job_id) {
+              matchedJobIdsToTouch.push(decision.matched_job_id);
             }
             continue;
           }
@@ -92,7 +104,7 @@ export default async function handler(req: any, res: any) {
           connectorNew++;
           totalNew++;
 
-          // Analisa a vaga elegível sem limites artificiais de quota
+          // Analisa a vaga elegível
           try {
             let analysis;
             if (preFilter.shouldSendToGemini) {
@@ -132,7 +144,8 @@ export default async function handler(req: any, res: any) {
                 salary_max: job.salary_max || null,
                 salary_currency: job.salary_currency || 'USD',
                 status: 'ACTIVE',
-                last_seen_at: new Date().toISOString()
+                last_seen_at: nowIso,
+                updated_at: nowIso
               };
 
               if (platformId) {
@@ -179,12 +192,24 @@ export default async function handler(req: any, res: any) {
                   confidence: analysis.confidence,
                   reason: analysis.reason,
                   analysis_version: analysis.analysis_version || 'v2-heuristic',
-                  analyzed_at: new Date().toISOString()
+                  analyzed_at: nowIso
                 }, { onConflict: 'job_id' });
               }
             }
           } catch (err: any) {
             console.warn(`[API Cron] Erro ao analisar ${job.title}:`, err.message);
+          }
+        }
+
+        // Atualiza em lote as vagas existentes confirmadas ativas
+        if (supabaseClient && matchedJobIdsToTouch.length > 0) {
+          const batchSize = 100;
+          for (let i = 0; i < matchedJobIdsToTouch.length; i += batchSize) {
+            const batch = matchedJobIdsToTouch.slice(i, i + batchSize);
+            await supabaseClient
+              .from('jobs')
+              .update({ last_seen_at: nowIso, updated_at: nowIso, status: 'ACTIVE' })
+              .in('id', batch);
           }
         }
 
@@ -200,6 +225,7 @@ export default async function handler(req: any, res: any) {
         };
         results.push(logEntry);
 
+        // Registra log da plataforma com tolerância a schema
         if (supabaseClient) {
           try {
             const { data: pLog } = await supabaseClient
@@ -215,6 +241,7 @@ export default async function handler(req: any, res: any) {
               jobs_found: connectorFound,
               jobs_new: connectorNew,
               jobs_updated: connectorUpdated,
+              started_at: new Date(cStart).toISOString(),
               finished_at: new Date().toISOString()
             };
             if (pLog?.id) logPayload.platform_id = pLog.id;
@@ -247,6 +274,7 @@ export default async function handler(req: any, res: any) {
               platform_slug: connector.slug,
               status: 'FAILED',
               error_message: err.message,
+              started_at: new Date(cStart).toISOString(),
               finished_at: new Date().toISOString()
             };
             if (pLog?.id) logPayload.platform_id = pLog.id;
@@ -261,9 +289,10 @@ export default async function handler(req: any, res: any) {
       }
     }
 
+    // Registra log consolidado geral
     if (supabaseClient) {
       try {
-        await (supabaseClient as any).from('source_logs').insert({
+        const globalLog: Record<string, any> = {
           platform_slug: 'all-cron',
           status: 'SUCCESS',
           jobs_found: totalFound,
@@ -271,7 +300,17 @@ export default async function handler(req: any, res: any) {
           jobs_updated: totalUpdated,
           started_at: new Date(startTime).toISOString(),
           finished_at: new Date().toISOString()
-        });
+        };
+        const { error: gErr } = await supabaseClient.from('source_logs').insert(globalLog);
+        if (gErr) {
+          // Fallback caso a tabela exija platform_id
+          const { data: firstPlat } = await supabaseClient.from('platforms').select('id').limit(1).maybeSingle();
+          if (firstPlat?.id) {
+            delete globalLog.platform_slug;
+            globalLog.platform_id = firstPlat.id;
+            await supabaseClient.from('source_logs').insert(globalLog);
+          }
+        }
       } catch {}
     }
 
