@@ -57,7 +57,8 @@ export default async function handler(req: any, res: any) {
         process_type: p.processType || 'ONLINE_EXAM',
         user_status: p.userStatus || 'NOT_REGISTERED',
         notes: p.notes || '',
-        status: p.status === 'BLACKLIST' ? 'DISABLED' : 'HEALTHY',
+        status: p.status === 'BLACKLIST' ? 'DISABLED' : (p.status === 'FAVORITE' ? 'FAVORITE' : 'HEALTHY'),
+        enabled: p.status !== 'BLACKLIST',
         average_pay_rate: p.averagePayRate || null,
         payment_methods: p.paymentMethods || [],
         updated_at: new Date().toISOString()

@@ -39,6 +39,20 @@ export default function App() {
                 websiteUrl: 'https://www.welocalize.com/'
               };
             }
+            // Auto-desbloqueia Turing do cache antigo se possuía a regra antiga
+            if (p.id === 'turing' && p.status === 'BLACKLIST' && p.blacklistReason?.includes('Exige testes avançados')) {
+              return {
+                ...p,
+                category: 'Desenvolvimento & IA',
+                currency: 'USD' as const,
+                englishRequirement: 'BASIC' as const,
+                processType: 'ONLINE_EXAM' as const,
+                status: 'ACTIVE' as const,
+                blacklistReason: undefined,
+                averagePayRate: '$15.00 - $40.00 / hora',
+                notes: p.notes || 'Foco em desenvolvedores e treinadores de IA em código.'
+              };
+            }
             return p;
           });
           return sortPlatformsAlphabetically(migrated);
@@ -50,9 +64,15 @@ export default function App() {
     return sortPlatformsAlphabetically(INITIAL_PLATFORMS);
   });
 
-  // Carrega do Supabase e sincroniza em tempo real
+  // Carrega do Supabase e sincroniza em tempo real com controle de frequência
   useEffect(() => {
-    const fetchLivePlatforms = () => {
+    let lastFetched = 0;
+    const fetchLivePlatforms = (force = false) => {
+      const now = Date.now();
+      if (!force && now - lastFetched < 15000) {
+        return;
+      }
+      lastFetched = now;
       loadPlatformsFromSupabase().then(loaded => {
         if (loaded && loaded.length > 0) {
           setPlatforms(sortPlatformsAlphabetically(loaded));
@@ -62,10 +82,10 @@ export default function App() {
       });
     };
 
-    fetchLivePlatforms();
+    fetchLivePlatforms(true);
 
-    const vercelHandler = () => fetchLivePlatforms();
-    const focusHandler = () => fetchLivePlatforms();
+    const vercelHandler = () => fetchLivePlatforms(true);
+    const focusHandler = () => fetchLivePlatforms(false);
 
     window.addEventListener('supabase-configured-from-vercel', vercelHandler);
     window.addEventListener('focus', focusHandler);
@@ -80,12 +100,15 @@ export default function App() {
     try {
       const saved = localStorage.getItem(STORAGE_KEY_RULES);
       if (saved) {
-        return JSON.parse(saved);
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) {
+          return parsed.filter(r => r.id !== 'bl-turing' && r.name.toLowerCase() !== 'turing');
+        }
       }
     } catch (e) {
       console.error('Error loading blacklist rules from storage:', e);
     }
-    return INITIAL_BLACKLIST_RULES;
+    return INITIAL_BLACKLIST_RULES.filter(r => r.id !== 'bl-turing' && r.name.toLowerCase() !== 'turing');
   });
 
   const [jobs, setJobs] = useState<JobOpportunity[]>(() => {
@@ -214,14 +237,22 @@ export default function App() {
       console.warn('[Supabase] Erro ao sincronizar plataforma:', err);
     });
 
-    // Se a plataforma não estiver na lista negra, faz varredura imediata de vagas
+    // Se a plataforma não estiver na lista negra, faz varredura imediata de vagas e limpa regra de bloqueio
     if (savedPlatform.status !== 'BLACKLIST') {
       harvestJobsForPlatform(savedPlatform).catch(err => {
         console.warn('[Harvest Platform Jobs] Erro ao coletar vagas da nova plataforma:', err);
       });
+      // Remove de forma consistente qualquer regra da lista negra com o mesmo nome
+      setBlacklistRules(r => {
+        const filtered = r.filter(rule => rule.name.toLowerCase() !== savedPlatform.name.toLowerCase());
+        try {
+          localStorage.setItem(STORAGE_KEY_RULES, JSON.stringify(filtered));
+        } catch {}
+        return filtered;
+      });
     }
 
-    // If marked as Blacklist, ensure there's a rule for it too
+    // Se marcada como Blacklist, garante que haja uma regra correspondente
     if (savedPlatform.status === 'BLACKLIST') {
       const ruleExists = blacklistRules.some(r => r.name.toLowerCase() === savedPlatform.name.toLowerCase());
       if (!ruleExists) {
@@ -232,7 +263,13 @@ export default function App() {
           reason: savedPlatform.blacklistReason || 'Plataforma adicionada à lista negra',
           addedAt: new Date().toISOString().split('T')[0]
         };
-        setBlacklistRules(r => [newRule, ...r]);
+        setBlacklistRules(r => {
+          const updated = [newRule, ...r];
+          try {
+            localStorage.setItem(STORAGE_KEY_RULES, JSON.stringify(updated));
+          } catch {}
+          return updated;
+        });
       }
     }
   };
@@ -247,7 +284,39 @@ export default function App() {
   };
 
   const handleRemoveRule = (id: string) => {
-    setBlacklistRules(prev => prev.filter(r => r.id !== id));
+    const ruleToRemove = blacklistRules.find(r => r.id === id);
+    setBlacklistRules(prev => {
+      const updated = prev.filter(r => r.id !== id);
+      try {
+        localStorage.setItem(STORAGE_KEY_RULES, JSON.stringify(updated));
+      } catch {}
+      return updated;
+    });
+
+    if (ruleToRemove) {
+      setPlatforms(prev => {
+        let changed = false;
+        const updated = prev.map(p => {
+          if (p.name.toLowerCase() === ruleToRemove.name.toLowerCase() && p.status === 'BLACKLIST') {
+            changed = true;
+            const updatedPlatform: Platform = {
+              ...p,
+              status: 'ACTIVE',
+              blacklistReason: undefined
+            };
+            savePlatformToSupabase(updatedPlatform).catch(() => {});
+            return updatedPlatform;
+          }
+          return p;
+        });
+        if (changed) {
+          try {
+            localStorage.setItem(STORAGE_KEY_PLATFORMS, JSON.stringify(updated));
+          } catch {}
+        }
+        return updated;
+      });
+    }
   };
 
   const handleOpenEdit = (platform: Platform) => {

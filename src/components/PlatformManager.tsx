@@ -157,7 +157,8 @@ export const PlatformManager: React.FC<PlatformManagerProps> = ({
       status: newStatus,
       blacklistReason: newStatus === 'BLACKLIST' 
         ? (platform.blacklistReason || 'Bloqueada manualmente pelo usuário') 
-        : undefined
+        : undefined,
+      updatedAt: new Date().toISOString().split('T')[0]
     });
   };
 

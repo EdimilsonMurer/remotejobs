@@ -17,7 +17,8 @@ export function platformToDatabaseRow(p: Platform) {
     currency: p.currency || 'USD',
     english_requirement: p.englishRequirement || 'READING_ONLY',
     process_type: p.processType || 'ONLINE_EXAM',
-    status: p.status === 'BLACKLIST' ? 'DISABLED' : 'HEALTHY',
+    status: p.status === 'BLACKLIST' ? 'DISABLED' : (p.status === 'FAVORITE' ? 'FAVORITE' : 'HEALTHY'),
+    enabled: p.status !== 'BLACKLIST',
     average_pay_rate: p.averagePayRate || null,
     payment_methods: p.paymentMethods || [],
     updated_at: new Date().toISOString()
@@ -28,6 +29,21 @@ export function platformToDatabaseRow(p: Platform) {
  * Converte linha do Supabase de volta para o modelo Platform
  */
 export function databaseRowToPlatform(row: any, fallback?: Platform): Platform {
+  const isRowDisabled = row.status === 'DISABLED' || row.status === 'BLACKLIST';
+  const isRowFavorite = row.status === 'FAVORITE';
+  const isRowHealthy = row.status === 'HEALTHY' || row.status === 'ACTIVE';
+
+  let status: PlatformStatus = 'ACTIVE';
+  if (isRowDisabled) {
+    status = 'BLACKLIST';
+  } else if (isRowFavorite) {
+    status = 'FAVORITE';
+  } else if (isRowHealthy) {
+    status = 'ACTIVE';
+  } else if (fallback?.status) {
+    status = fallback.status;
+  }
+
   return {
     id: row.slug || fallback?.id || row.id,
     name: row.name || fallback?.name || 'Plataforma',
@@ -37,8 +53,10 @@ export function databaseRowToPlatform(row: any, fallback?: Platform): Platform {
     currency: (row.currency as any) || fallback?.currency || 'USD',
     englishRequirement: (row.english_requirement as any) || fallback?.englishRequirement || 'READING_ONLY',
     processType: (row.process_type as any) || fallback?.processType || 'ONLINE_EXAM',
-    status: row.status === 'DISABLED' ? 'BLACKLIST' : (fallback?.status || 'ACTIVE'),
-    blacklistReason: fallback?.blacklistReason,
+    status,
+    blacklistReason: status === 'BLACKLIST' 
+      ? (row.blacklist_reason || fallback?.blacklistReason || 'Plataforma adicionada à lista negra') 
+      : undefined,
     paymentMethods: row.payment_methods || fallback?.paymentMethods || [],
     notes: row.notes !== undefined && row.notes !== null ? row.notes : (fallback?.notes || ''),
     averagePayRate: row.average_pay_rate || fallback?.averagePayRate,
@@ -156,6 +174,7 @@ export async function savePlatformToSupabase(platform: Platform): Promise<{ succ
         english_requirement: row.english_requirement,
         process_type: row.process_type,
         status: row.status,
+        enabled: row.enabled,
         average_pay_rate: row.average_pay_rate,
         payment_methods: row.payment_methods,
         updated_at: row.updated_at

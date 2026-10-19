@@ -246,14 +246,14 @@ export const INITIAL_PLATFORMS: Platform[] = [
     name: 'Turing',
     websiteUrl: 'https://www.turing.com/',
     careersUrl: 'https://www.turing.com/jobs',
-    category: 'Tech & Engenharia',
+    category: 'Desenvolvimento & IA',
     currency: 'USD',
-    englishRequirement: 'FLUENT_INTERVIEW',
-    processType: 'LIVE_INTERVIEW',
-    status: 'BLACKLIST',
-    blacklistReason: 'Exige testes avançados e entrevistas de comunicação em inglês fluente.',
-    paymentMethods: ['Wire'],
-    notes: 'Bloqueada da busca por exigir proficiência e entrevista oral em inglês.',
+    englishRequirement: 'BASIC',
+    processType: 'ONLINE_EXAM',
+    status: 'ACTIVE',
+    paymentMethods: ['Transferência Bancária'],
+    notes: 'Foco em desenvolvedores e treinadores de IA em código.',
+    averagePayRate: '$15.00 - $40.00 / hora',
     userStatus: 'NOT_REGISTERED'
   },
   {
@@ -279,13 +279,6 @@ export const INITIAL_BLACKLIST_RULES: BlacklistRule[] = [
     name: 'Micro1',
     type: 'PLATFORM',
     reason: 'Exige entrevista técnica ao vivo em inglês fluente.',
-    addedAt: '2026-10-02'
-  },
-  {
-    id: 'bl-turing',
-    name: 'Turing',
-    type: 'PLATFORM',
-    reason: 'Exige testes avançados e entrevistas de comunicação em inglês fluente.',
     addedAt: '2026-10-02'
   },
   {
