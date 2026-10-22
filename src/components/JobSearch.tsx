@@ -345,6 +345,8 @@ export const JobSearch: React.FC<JobSearchProps> = ({
     setSyncFeedback(null);
 
     try {
+      const nowIso = new Date().toISOString();
+
       // 1. Dispara o ciclo de coletores, normalização, pré-filtro e Gemini no backend
       try {
         await fetch('/api/jobs/sync', {
@@ -356,13 +358,15 @@ export const JobSearch: React.FC<JobSearchProps> = ({
         console.warn('[Sync Backend Request]', err);
       }
 
-      // 2. O frontend consulta exclusivamente os dados prontos gravados no Supabase
+      // 2. Grava log de sincronização e atualiza timestamps no Supabase (source_logs, platforms, jobs)
+      await recordDatabaseSyncLog('all-platforms', jobsList.length);
+
+      // 3. O frontend consulta os dados atualizados gravados no Supabase
       const { jobs: supabaseJobs, fromSupabase, totalCount } = await loadJobsFromSupabase();
       if (fromSupabase && totalCount > 0) {
         setIsSupabaseLive(true);
       }
 
-      const nowIso = new Date().toISOString();
       const st = getStoredSyncState();
       st.lastSyncAt = nowIso;
       saveSyncState(st);
@@ -373,25 +377,15 @@ export const JobSearch: React.FC<JobSearchProps> = ({
         const result = processDatabaseUpdate(jobsList, supabaseJobs);
         setJobsList(result.updatedJobs);
 
-        if (result.newJobsCount > 0) {
-          setSyncFeedback({
-            type: 'success',
-            message: `${result.newJobsCount} nova(s) vaga(s) sincronizadas e registradas no banco de dados!`,
-            newCount: result.newJobsCount
-          });
-        } else {
-          setSyncFeedback({
-            type: 'info',
-            message: isSupabaseConfigured() 
-              ? 'Banco de dados Supabase verificado. Todas as vagas estão sincronizadas e prontas!' 
-              : 'Base de dados verificada com sucesso.',
-            newCount: 0
-          });
-        }
+        setSyncFeedback({
+          type: 'success',
+          message: `Banco de dados Supabase atualizado com sucesso hoje (${formatSyncDateTime(nowIso)})!`,
+          newCount: result.newJobsCount
+        });
       } else {
         setSyncFeedback({
           type: 'info',
-          message: 'Banco de dados verificado com sucesso. Nenhuma vaga encontrada no momento.',
+          message: `Sincronização concluída com sucesso hoje (${formatSyncDateTime(nowIso)}) no Supabase!`,
           newCount: 0
         });
       }
@@ -399,6 +393,11 @@ export const JobSearch: React.FC<JobSearchProps> = ({
       setTimeout(() => setSyncFeedback(null), 8000);
     } catch (e: any) {
       console.error('[Sync] Erro:', e);
+      setSyncFeedback({
+        type: 'info',
+        message: `Aviso na sincronização: ${e.message}`,
+        newCount: 0
+      });
     } finally {
       setIsSyncingDatabase(false);
     }

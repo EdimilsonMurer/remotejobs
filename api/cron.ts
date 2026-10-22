@@ -292,6 +292,7 @@ export default async function handler(req: any, res: any) {
     // Registra log consolidado geral
     if (supabaseClient) {
       try {
+        const finishIso = new Date().toISOString();
         const globalLog: Record<string, any> = {
           platform_slug: 'all-cron',
           status: 'SUCCESS',
@@ -299,7 +300,7 @@ export default async function handler(req: any, res: any) {
           jobs_new: totalNew,
           jobs_updated: totalUpdated,
           started_at: new Date(startTime).toISOString(),
-          finished_at: new Date().toISOString()
+          finished_at: finishIso
         };
         const { error: gErr } = await supabaseClient.from('source_logs').insert(globalLog);
         if (gErr) {
@@ -311,6 +312,13 @@ export default async function handler(req: any, res: any) {
             await supabaseClient.from('source_logs').insert(globalLog);
           }
         }
+
+        // Atualiza timestamp em platforms
+        await supabaseClient.from('platforms').update({
+          last_run_at: finishIso,
+          last_success_at: finishIso,
+          updated_at: finishIso
+        }).eq('enabled', true);
       } catch {}
     }
 

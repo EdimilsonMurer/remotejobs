@@ -238,15 +238,15 @@ export async function loadJobsFromSupabase(): Promise<{
 
     // Consulta os logs oficiais de sincronização na tabela source_logs do Supabase
     try {
-      const { data: latestLogs } = await supabase
+      const { data: latestLogs, error: logErr } = await supabase
         .from('source_logs')
-        .select('finished_at, started_at, created_at')
-        .order('finished_at', { ascending: false })
-        .limit(3);
+        .select('finished_at, started_at')
+        .order('finished_at', { ascending: false, nullsFirst: false })
+        .limit(5);
 
-      if (latestLogs && Array.isArray(latestLogs) && latestLogs.length > 0) {
+      if (!logErr && latestLogs && Array.isArray(latestLogs) && latestLogs.length > 0) {
         for (const log of (latestLogs as any[])) {
-          const logTs = log.finished_at || log.started_at || log.created_at;
+          const logTs = log.finished_at || log.started_at;
           if (logTs && (!latestUpdateIso || new Date(logTs).getTime() > new Date(latestUpdateIso).getTime())) {
             latestUpdateIso = logTs;
           }
@@ -255,6 +255,24 @@ export async function loadJobsFromSupabase(): Promise<{
     } catch (e: any) {
       console.warn('[Supabase Jobs] Aviso ao checar source_logs:', e?.message);
     }
+
+    // Consulta plataformas atualizadas no Supabase
+    try {
+      const { data: plats, error: pErr } = await (supabase
+        .from('platforms') as any)
+        .select('updated_at, last_run_at, last_success_at')
+        .order('updated_at', { ascending: false, nullsFirst: false })
+        .limit(5);
+
+      if (!pErr && plats && Array.isArray(plats)) {
+        for (const p of (plats as any[])) {
+          const pTs = p.updated_at || p.last_success_at || p.last_run_at;
+          if (pTs && (!latestUpdateIso || new Date(pTs).getTime() > new Date(latestUpdateIso).getTime())) {
+            latestUpdateIso = pTs;
+          }
+        }
+      }
+    } catch {}
 
     // Checa também o timestamp armazenado localmente para nunca regredir a data de sincronização
     if (typeof window !== 'undefined') {
@@ -804,6 +822,7 @@ export async function recordDatabaseSyncLog(platformSlug: string = 'all-platform
 
   if (isSupabaseConfigured()) {
     try {
+      // 1. Grava no source_logs
       await (supabase as any).from('source_logs').insert({
         platform_slug: platformSlug,
         status: 'SUCCESS',
@@ -811,6 +830,19 @@ export async function recordDatabaseSyncLog(platformSlug: string = 'all-platform
         started_at: nowIso,
         finished_at: nowIso
       });
+
+      // 2. Atualiza timestamp nas plataformas ativas
+      await (supabase as any).from('platforms').update({
+        updated_at: nowIso,
+        last_run_at: nowIso,
+        last_success_at: nowIso
+      }).eq('enabled', true);
+
+      // 3. Atualiza last_seen_at das vagas ativas para carimbar a data da varredura
+      await (supabase as any).from('jobs').update({
+        last_seen_at: nowIso,
+        updated_at: nowIso
+      }).eq('status', 'ACTIVE');
     } catch (e: any) {
       console.warn('[Supabase Sync Log] Aviso ao registrar log:', e?.message);
     }
