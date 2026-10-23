@@ -11,6 +11,7 @@ import { ConnectorRegistry } from './src/connectors/registry';
 import seedAllHandler from './api/supabase/seed-all.ts';
 import cronHandler from './api/cron.ts';
 import healthHandler from './api/health.ts';
+import authVerifyHandler from './api/auth/verify.ts';
 
 dotenv.config();
 
@@ -312,6 +313,11 @@ ANALISE A PLATFORMA E RETORNE EXATAMENTE O OBJETO JSON com as seguintes regras:
   // Rota de Health Check
   app.get('/api/health', (req, res) => {
     return healthHandler(req, res);
+  });
+
+  // Rota de Autenticação / Senha Master
+  app.all('/api/auth/verify', async (req, res) => {
+    return authVerifyHandler(req, res);
   });
 
   // Rota de tradução com Gemini para Português

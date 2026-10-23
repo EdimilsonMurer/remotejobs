@@ -226,6 +226,16 @@ export default async function handler(req: any, res: any) {
       if (!error) report.job_history++;
     }
 
+    // 7. Semeia app_security
+    try {
+      await supabase.from('app_security').upsert({
+        id: 'master',
+        password_hash: '192bcc1a8bc3afe968156bb13230e482fa6fbc1858a6f5b07da8665ee997fc26',
+        hint: 'Senha Master (Padrão: remote2026)',
+        updated_at: new Date().toISOString()
+      }, { onConflict: 'id' });
+    } catch {}
+
     return res.status(200).json({
       success: true,
       message: 'Todas as tabelas do Supabase foram sincronizadas com sucesso!',

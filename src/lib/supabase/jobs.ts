@@ -596,6 +596,16 @@ export async function seedAllDatabaseTablesToSupabase(): Promise<{
     await saveCandidateNotesToSupabase(cData);
   } catch {}
 
+  // 8. Semeia Proteção e Senha Master inicial (app_security)
+  try {
+    await (supabase.from('app_security') as any).upsert({
+      id: 'master',
+      password_hash: '192bcc1a8bc3afe968156bb13230e482fa6fbc1858a6f5b07da8665ee997fc26',
+      hint: 'Senha Master (Padrão: remote2026)',
+      updated_at: new Date().toISOString()
+    }, { onConflict: 'id' });
+  } catch {}
+
   const success = jobsCount > 0 || platformsCount > 0;
 
   return {

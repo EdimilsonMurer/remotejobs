@@ -22,7 +22,9 @@ import {
   X,
   Tag,
   Link as LinkIcon,
-  Server
+  Server,
+  Lock,
+  ShieldAlert
 } from 'lucide-react';
 import { 
   getSupabaseConfig, 
@@ -40,6 +42,7 @@ import {
   resetDefaultBlockedKeywords, 
   clearAllBlockedKeywords 
 } from '../services/blockedKeywordsService';
+import { changeAppPassword, logoutApp } from '../lib/supabase/security';
 
 export const SettingsManager: React.FC = () => {
   // Configurações do Supabase
@@ -95,6 +98,49 @@ export const SettingsManager: React.FC = () => {
   const [hiddenCount, setHiddenCount] = useState<number>(() => {
     return getHiddenJobIds().size;
   });
+
+  // Estado de Segurança e Senha Master
+  const [curPassword, setCurPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [isChangingPassword, setIsChangingPassword] = useState(false);
+  const [pwFeedback, setPwFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [showChangeForm, setShowChangeForm] = useState(false);
+
+  const handleChangePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!curPassword.trim() || !newPassword.trim()) {
+      setPwFeedback({ type: 'error', message: 'Preencha a senha atual e a nova senha.' });
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setPwFeedback({ type: 'error', message: 'A confirmação de senha não confere com a nova senha.' });
+      return;
+    }
+    if (newPassword.length < 4) {
+      setPwFeedback({ type: 'error', message: 'A nova senha deve ter no mínimo 4 caracteres.' });
+      return;
+    }
+
+    setIsChangingPassword(true);
+    setPwFeedback(null);
+    try {
+      const res = await changeAppPassword(curPassword, newPassword);
+      if (res.success) {
+        setPwFeedback({ type: 'success', message: res.message });
+        setCurPassword('');
+        setNewPassword('');
+        setConfirmPassword('');
+        setTimeout(() => setShowChangeForm(false), 3500);
+      } else {
+        setPwFeedback({ type: 'error', message: res.message });
+      }
+    } catch (err: any) {
+      setPwFeedback({ type: 'error', message: err.message || 'Erro ao alterar senha.' });
+    } finally {
+      setIsChangingPassword(false);
+    }
+  };
 
   // Lista de Palavras Proibidas / Blacklist de Termos em Anúncios
   const [blockedWords, setBlockedWords] = useState<string[]>(() => {
@@ -291,6 +337,154 @@ jobs:
           <span>{saveFeedback}</span>
         </div>
       )}
+
+      {/* SEÇÃO DE SEGURANÇA & CONTROLE DE ACESSO */}
+      <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-6 space-y-5">
+        <div className="flex items-center justify-between flex-wrap gap-3 border-b border-slate-800 pb-4">
+          <div className="flex items-start gap-3">
+            <div className="w-10 h-10 rounded-xl bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-center text-cyan-400 shrink-0 mt-0.5">
+              <Lock className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h2 className="text-sm font-bold text-white">
+                  Segurança & Proteção por Senha Master
+                </h2>
+                <span className="text-[10px] bg-emerald-950/80 text-emerald-400 border border-emerald-800/80 px-2 py-0.5 rounded-full font-semibold flex items-center gap-1">
+                  <ShieldCheck className="w-3 h-3" />
+                  Proteção Ativa
+                </span>
+              </div>
+              <p className="text-xs text-slate-400 mt-1 max-w-2xl leading-relaxed">
+                Qualquer pessoa que acessar o link pela primeira vez precisará digitar a senha master para entrar. O navegador memoriza o acesso seguro e não solicita novamente nas próximas visitas.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => logoutApp()}
+              className="px-3.5 py-2 bg-slate-950 hover:bg-slate-800 text-rose-300 hover:text-rose-200 text-xs font-semibold rounded-xl border border-rose-900/50 transition-colors flex items-center gap-1.5 cursor-pointer shadow-xs"
+              title="Exige a senha master imediatamente neste navegador"
+            >
+              <Lock className="w-3.5 h-3.5 text-rose-400" />
+              <span>Bloquear Acesso Agora (Sair)</span>
+            </button>
+
+            <button
+              onClick={() => setShowChangeForm(!showChangeForm)}
+              className="px-3.5 py-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold rounded-xl transition-colors flex items-center gap-1.5 cursor-pointer shadow-xs"
+            >
+              <KeyRound className="w-3.5 h-3.5" />
+              <span>{showChangeForm ? 'Fechar Alteração' : 'Alterar Senha Master'}</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Informações de Autenticação */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
+          <div className="bg-slate-950 p-3.5 rounded-xl border border-slate-800/80">
+            <span className="text-slate-400 block mb-1">Status da Sessão</span>
+            <span className="text-emerald-400 font-bold flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+              Autenticado neste navegador
+            </span>
+          </div>
+
+          <div className="bg-slate-950 p-3.5 rounded-xl border border-slate-800/80">
+            <span className="text-slate-400 block mb-1">Senha Inicial de Fábrica</span>
+            <span className="font-mono text-cyan-300 font-bold">
+              remote2026
+            </span>
+          </div>
+
+          <div className="bg-slate-950 p-3.5 rounded-xl border border-slate-800/80">
+            <span className="text-slate-400 block mb-1">Persistência</span>
+            <span className="text-slate-200 font-medium">
+              Gravada no Supabase (app_security)
+            </span>
+          </div>
+        </div>
+
+        {/* Formulário de Alteração de Senha */}
+        {showChangeForm && (
+          <form onSubmit={handleChangePassword} className="bg-slate-950/80 p-5 rounded-xl border border-cyan-800/40 space-y-4 animate-in fade-in">
+            <div className="flex items-center gap-2 text-xs font-bold text-cyan-300">
+              <KeyRound className="w-4 h-4" />
+              <span>Definir Nova Senha Master</span>
+            </div>
+
+            {pwFeedback && (
+              <div className={`p-3 rounded-lg text-xs flex items-center gap-2 ${
+                pwFeedback.type === 'success' 
+                  ? 'bg-emerald-950/80 border border-emerald-800 text-emerald-300' 
+                  : 'bg-rose-950/80 border border-rose-800 text-rose-300'
+              }`}>
+                {pwFeedback.type === 'success' ? <CheckCircle2 className="w-4 h-4 shrink-0" /> : <AlertCircle className="w-4 h-4 shrink-0" />}
+                <span>{pwFeedback.message}</span>
+              </div>
+            )}
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div>
+                <label className="block text-[11px] font-medium text-slate-300 mb-1">
+                  Senha Atual
+                </label>
+                <input
+                  type="password"
+                  value={curPassword}
+                  onChange={(e) => setCurPassword(e.target.value)}
+                  placeholder="Ex: remote2026"
+                  className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-lg text-xs text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-medium text-slate-300 mb-1">
+                  Nova Senha
+                </label>
+                <input
+                  type="password"
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  placeholder="Mínimo 4 caracteres"
+                  className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-lg text-xs text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-medium text-slate-300 mb-1">
+                  Confirmar Nova Senha
+                </label>
+                <input
+                  type="password"
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  placeholder="Repita a nova senha"
+                  className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-lg text-xs text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500"
+                />
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowChangeForm(false)}
+                className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-white text-xs rounded-lg transition-colors cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                type="submit"
+                disabled={isChangingPassword}
+                className="px-4 py-1.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs rounded-lg transition-colors cursor-pointer disabled:opacity-50"
+              >
+                {isChangingPassword ? 'Salvando no Supabase...' : 'Salvar Nova Senha'}
+              </button>
+            </div>
+          </form>
+        )}
+      </div>
 
       {/* Seção 1: Frequência da Busca Automática */}
       <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-6 space-y-5">
@@ -1334,6 +1528,16 @@ CREATE TABLE IF NOT EXISTS candidate_notes (
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- 8.2. TABELA DE SEGURANÇA E SENHA MASTER (app_security)
+CREATE TABLE IF NOT EXISTS app_security (
+    id VARCHAR(50) PRIMARY KEY DEFAULT 'master',
+    password_hash VARCHAR(128) NOT NULL,
+    hint TEXT DEFAULT 'Senha Master do Sistema',
+    last_login_at TIMESTAMPTZ,
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
 -- 9. ÍNDICES DE ALTA PERFORMANCE
 CREATE INDEX IF NOT EXISTS idx_platforms_slug ON platforms(slug);
 CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status);
@@ -1351,6 +1555,7 @@ ALTER TABLE source_logs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE job_history ENABLE ROW LEVEL SECURITY;
 ALTER TABLE favorites ENABLE ROW LEVEL SECURITY;
 ALTER TABLE candidate_notes ENABLE ROW LEVEL SECURITY;
+ALTER TABLE app_security ENABLE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS "Public access platforms" ON platforms;
 CREATE POLICY "Public access platforms" ON platforms FOR ALL USING (true) WITH CHECK (true);
@@ -1378,6 +1583,14 @@ CREATE POLICY "Public access favorites" ON favorites FOR ALL USING (true) WITH C
 
 DROP POLICY IF EXISTS "Public access candidate_notes" ON candidate_notes;
 CREATE POLICY "Public access candidate_notes" ON candidate_notes FOR ALL USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Public access app_security" ON app_security;
+CREATE POLICY "Public access app_security" ON app_security FOR ALL USING (true) WITH CHECK (true);
+
+-- Inicia a senha master 'remote2026'
+INSERT INTO app_security (id, password_hash, hint, updated_at)
+VALUES ('master', '192bcc1a8bc3afe968156bb13230e482fa6fbc1858a6f5b07da8665ee997fc26', 'Senha Master (Padrão: remote2026)', NOW())
+ON CONFLICT (id) DO NOTHING;
 
 -- Concede permissões explícitas para anon e authenticated
 GRANT ALL ON ALL TABLES IN SCHEMA public TO anon, authenticated, service_role;

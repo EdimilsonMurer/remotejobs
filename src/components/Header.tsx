@@ -1,5 +1,5 @@
 import React from 'react';
-import { ShieldAlert, Compass, Layers, Settings, BookOpen, Plus, Bot, Globe, Activity, Clipboard } from 'lucide-react';
+import { ShieldAlert, Compass, Layers, Settings, BookOpen, Plus, Bot, Globe, Activity, Clipboard, Lock } from 'lucide-react';
 
 interface HeaderProps {
   activeTab: 'jobs' | 'platforms' | 'blacklist' | 'crewai' | 'guide' | 'pipeline' | 'settings' | 'notepad';
@@ -8,6 +8,7 @@ interface HeaderProps {
   favoritesCount: number;
   activeAccountsCount: number;
   onOpenAddModal: () => void;
+  onLockApp?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -16,7 +17,8 @@ export const Header: React.FC<HeaderProps> = ({
   blacklistCount,
   favoritesCount,
   activeAccountsCount,
-  onOpenAddModal
+  onOpenAddModal,
+  onLockApp
 }) => {
   return (
     <header className="sticky top-0 z-40 bg-slate-950/90 backdrop-blur-md border-b border-slate-800/80 px-4 sm:px-8 py-3.5 transition-all">
@@ -157,6 +159,17 @@ export const Header: React.FC<HeaderProps> = ({
 
         {/* Zone 3: Primary Action */}
         <div className="flex items-center gap-2">
+          {onLockApp && (
+            <button
+              onClick={onLockApp}
+              className="p-1.5 text-slate-400 hover:text-cyan-300 hover:bg-slate-900 border border-transparent hover:border-slate-800 rounded-lg transition-colors cursor-pointer flex items-center gap-1.5 text-xs"
+              title="Bloquear Acesso (Exigir senha na próxima vez)"
+            >
+              <Lock className="w-3.5 h-3.5 text-slate-400" />
+              <span className="hidden lg:inline text-[11px]">Bloquear</span>
+            </button>
+          )}
+
           <button
             onClick={onOpenAddModal}
             className="px-3.5 py-1.5 text-xs font-semibold text-slate-950 bg-emerald-400 hover:bg-emerald-300 rounded-lg transition-colors whitespace-nowrap flex items-center gap-1.5 shadow-sm active:scale-95"

@@ -13,6 +13,8 @@ import { Platform, BlacklistRule, JobOpportunity } from './types/job';
 import { INITIAL_PLATFORMS, INITIAL_BLACKLIST_RULES } from './data/initialPlatforms';
 import { loadPlatformsFromSupabase, savePlatformToSupabase, deletePlatformFromSupabase } from './lib/supabase/platforms';
 import { saveJobToSupabase, harvestJobsForPlatform, isFabricatedJob } from './lib/supabase/jobs';
+import { PasswordLockScreen } from './components/PasswordLockScreen';
+import { isAppAuthenticated, logoutApp } from './lib/supabase/security';
 
 const STORAGE_KEY_PLATFORMS = 'remotehunter_platforms_v1';
 const STORAGE_KEY_RULES = 'remotehunter_blacklist_rules_v1';
@@ -22,6 +24,20 @@ const sortPlatformsAlphabetically = (list: Platform[]): Platform[] => {
 };
 
 export default function App() {
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => isAppAuthenticated());
+
+  useEffect(() => {
+    const authHandler = (e: any) => {
+      if (e.detail && typeof e.detail.authenticated === 'boolean') {
+        setIsAuthenticated(e.detail.authenticated);
+      } else {
+        setIsAuthenticated(isAppAuthenticated());
+      }
+    };
+    window.addEventListener('app-auth-changed', authHandler);
+    return () => window.removeEventListener('app-auth-changed', authHandler);
+  }, []);
+
   const [activeTab, setActiveTab] = useState<'jobs' | 'platforms' | 'blacklist' | 'crewai' | 'guide' | 'pipeline' | 'settings' | 'notepad'>('jobs');
   
   // Load state from localStorage with fallbacks & auto-migration (sempre em ordem alfabética)
@@ -335,6 +351,10 @@ export default function App() {
   const favoritesCount = platforms.filter(p => p.status === 'FAVORITE').length;
   const activeAccountsCount = platforms.filter(p => p.status !== 'BLACKLIST' && p.userStatus === 'APPROVED_ACTIVE').length;
 
+  if (!isAuthenticated) {
+    return <PasswordLockScreen onAuthenticated={() => setIsAuthenticated(true)} />;
+  }
+
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col selection:bg-emerald-500 selection:text-slate-950">
       
@@ -346,6 +366,7 @@ export default function App() {
         favoritesCount={favoritesCount}
         activeAccountsCount={activeAccountsCount}
         onOpenAddModal={handleOpenAdd}
+        onLockApp={() => logoutApp()}
       />
 
       {/* Main Content Area */}
